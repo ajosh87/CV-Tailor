@@ -397,3 +397,49 @@ def test_linkedins_apply_tab_is_followed_once_it_has_somewhere_to_go(tmp_path):
     assert store.get_application(application.id).allowed_sites == []  # "about" is not a website to allow
     session._step()
     assert waited and session._steps == 0  # waits for the tab to load; no step spent, nothing asked
+
+
+def test_working_at_the_hiring_company_is_answered_from_your_roles_not_guessed():
+    details = {**DETAILS, "hiring": "Acme Scientific", "employers": [
+        {"company": "Northwind Software Private Ltd.", "title": "Engineer", "current": True},
+        {"company": "Babbage & Co", "title": "Analyst", "current": False}]}
+    page = {"fields": [
+        _field("c1", "Are you currently a full time or part time employee at Acme Scientific? *", kind="select",
+               options=["Yes", "No"], required=True),
+        _field("c2", "Have you ever worked for Babbage & Co or its affiliates?", kind="radio", options=["Yes", "No"], ids=["a", "b"]),
+        _field("c3", "Are you currently employed by Babbage?", kind="radio", options=["Yes", "No"], ids=["c", "d"])], "buttons": []}
+    actions, _ = planner.by_rule(page, details, {})
+    assert [(a.id, a.value) for a in actions] == [("c1", "No"), ("c2", "Yes"), ("c3", "No")]
+    assert "no role at Acme Scientific" in actions[0].shown and "Analyst at Babbage & Co" in actions[1].shown
+
+    prompt = planner.build_prompt(page, [], "{}", details, "Engineer at Acme Scientific")
+    assert "Hiring company: Acme Scientific" in prompt and "Engineer at Northwind Software Private Ltd. (current)" in prompt
+    assert "never confuse the employer you are applying to" in prompt.casefold()
+
+
+def test_replies_in_another_shape_never_crash_a_step():
+    page = {"fields": [_field("c1", "Notice period")], "buttons": [{"id": "c2", "text": "Next"}]}
+    plan = planner.parse_plan({"fill": ["c1", {"id": "c1", "value": "30 days", "why": "saved answer"}], "ask": ["c1"],
+                               "next": "click", "next_id": "c2"}, page, page["fields"])
+    assert [(a.id, a.value, a.why) for a in plan.actions] == [("c1", "30 days", "saved answer")]
+    assert (plan.next, plan.next_id) == ("click", "c2")
+
+
+def test_saved_answers_with_an_address_or_pin_code_are_hidden_from_the_llm():
+    from cv_maker.privacy import mask
+    details = {**DETAILS, "custom": [{"question": "Address Line 1", "answer": "12 Long Street"},
+                                     {"question": "Pin Code", "answer": "600001"},
+                                     {"question": "Willing to relocate?", "answer": "yes"}]}
+    secrets = app_details.secrets(details)
+    masked, _ = mask("Address Line 1: 12 Long Street\nPin Code: 600001\nWilling to relocate?: yes", secrets)
+    assert "Long Street" not in masked and "600001" not in masked and "relocate?: yes" in masked
+
+
+def test_a_local_model_has_no_cap_or_pace(tmp_path):
+    from cv_maker.settings import llm_limits, save_automation, save_settings
+    save_automation(tmp_path, {"LLM_RPM": "10", "LLM_DAILY_CAP": "45"})
+    save_settings(tmp_path, {"LLM_PROVIDER": "openrouter", "LLM_MODEL": "x:free", "LLM_API_KEY": "sk-or-test"})
+    assert (llm_limits(tmp_path)["rpm"], llm_limits(tmp_path)["daily"]) == (10, 45)
+    save_settings(tmp_path, {"LLM_PROVIDER": "ollama", "LLM_MODEL": "llama3"})
+    local = llm_limits(tmp_path)
+    assert (local["rpm"], local["daily"], local["local"]) == (0, 0, True)

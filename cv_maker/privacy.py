@@ -488,6 +488,11 @@ class PrivateModel:
         self._allow = list(allow)
         self._cache = cache
         self._scope = scope
+
+    @property
+    def name(self) -> str:
+        """The model answering ("OpenRouter · deepseek/deepseek-r1"), for saying what wrote what."""
+        return self._scope
         self.last_mapping: dict = {}
 
     def with_extra(self, extra, allow=()) -> "PrivateModel":
@@ -514,9 +519,10 @@ class PrivateModel:
                 feed.emit("llm", f"→ {purpose} · same request as before, reused the earlier answer (0 tokens)")
                 if self._log is not None:
                     self._log(purpose, text, keys, {"tokens_in": 0, "tokens_out": 0, "estimated": False, "seconds": 0,
-                                                    "failed": False, "cached": True})
+                                                    "failed": False, "cached": True, "model": self._scope})
                 return unmask(cached, mapping, json_escape=True)
-        feed.emit("llm", f"→ {purpose} · {len(text):,} chars" + (f" · hid {describe_hidden(keys)}" if keys else ""))
+        feed.emit("llm", f"→ {purpose} · {self._scope or 'model'} · {len(text):,} chars"
+                         + (f" · hid {describe_hidden(keys)}" if keys else ""))
         started, reply, error = time.monotonic(), "", None
         try:
             reply = self.inner.complete(sent, json_mode=json_mode)
@@ -544,4 +550,4 @@ class PrivateModel:
             feed.emit("error", f"✗ LLM call failed after {seconds:.1f}s ({type(error).__name__})")
         if self._log is not None:
             self._log(purpose, text, keys, {"tokens_in": tokens_in, "tokens_out": tokens_out, "estimated": estimated,
-                                            "seconds": round(seconds, 2), "failed": error is not None})
+                                            "seconds": round(seconds, 2), "failed": error is not None, "model": self._scope})

@@ -1,9 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
-  <title>CV Tailor</title>
-  <!-- A common tailorbird (Orthotomus sutorius): long bill, cocked tail. Body and tail form a check mark. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" role="img" aria-labelledby="title desc">
+  <title id="title">CV Tailor</title>
+  <desc id="desc">A common tailorbird (Orthotomus sutorius): long bill, cocked tail. Body and tail form a check mark.</desc>
   <rect x="2" y="2" width="116" height="116" rx="26" fill="#c8f53d"/>
-  <g transform="translate(10 6) scale(0.86)">
-    <path fill="#0c0c0e" d="M9,49.5 Q20,46 33,44.5 C34,36 40,31 47,31 C55,31 60,37 60,44 C61,52 65,58 70,64 L86,14 C87.5,10 92.5,10 93,14 L79,77 C77,84 72,88 65,90 C55,93 45,90 40,82 C35,74 33,63 33.5,55 L33.5,51 Q20,52.5 9,49.5 Z"/>
-    <circle cx="42" cy="41" r="2.6" fill="#c8f53d"/>
-  </g>
+  <path fill="#0c0c0e" d="M9,52.5 Q22,49.5 34.5,48 C36,41 40.5,35.8 47,35.5 C51,35.3 54,37 55.5,40 C56.5,42.5 56,45.5 57,49 C59,56 64,60.5 72,63.5 C82,41 92,26 101,15 C102,13.5 103.6,13.2 104.2,14.6 C94,39 87.5,58 82.5,76.5 C81,83.5 75,88 68,89.5 C58.5,91.5 48.5,89 44,82 C40,75.5 38,64.5 37.8,56 Q23.5,54 9,52.5 Z"/>
+  <circle cx="45.5" cy="42.5" r="2.6" fill="#c8f53d"/>
 </svg>

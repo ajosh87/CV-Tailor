@@ -370,6 +370,11 @@ def complete_json(model: ChatModel, prompt: str) -> dict:
     return parse_json_reply(model.complete(retry, json_mode=json_mode))
 
 
+def model_name(model) -> str:
+    """The name a wrapped model goes by ("OpenRouter · deepseek/deepseek-r1"), or "" for a bare one (tests)."""
+    return str(getattr(model, "name", "") or "")
+
+
 def check_connection(config: Mapping[str, str]) -> str:
     """Make one tiny call; returns a success message or raises ProviderUnsetError/LLMError."""
     model = get_chat_model(config)

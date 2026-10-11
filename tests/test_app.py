@@ -133,7 +133,7 @@ def test_upload_parses_profile_and_keeps_cookie_small(app):
     assert res.status_code == 302 and res.headers["Location"].endswith("/review")
     assert len(_session_cookie(res)) < 500  # CV text lives in SQLite, not the cookie
     page = client.get("/profile").data
-    assert b"Ada Lovelace" in page and b"Engineer \xe2\x80\x94 Northwind" in page
+    assert b"Ada Lovelace" in page and b'Engineer \xe2\x80\x94 <span class="co">Northwind</span>' in page
     assert b"Built Python APIs" in page  # the full saved profile, not a summary
     assert b"Source CVs" in page and b"cv.docx" in page
     assert b"Edit profile" in page

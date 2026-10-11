@@ -20,6 +20,9 @@
   --nb-tag: #8b8b95;
   --nb-apply: #7ee0c3;
   --nb-user: #d7a6ff;
+  --company: #20f3faec;
+  --fold: color-mix(in srgb, #b9a3ff 7%, #141417);
+  --fold-hover: color-mix(in srgb, #b9a3ff 12%, #141417);
   --radius: 8px;
   --font-display: 'Space Grotesk', system-ui, sans-serif;
   --font-body: 'Inter', system-ui, sans-serif;
@@ -48,6 +51,9 @@
   --nb-tag: #6b6b74;
   --nb-apply: #0f766e;
   --nb-user: #7e3fbf;
+  --company: #6a3fbf;
+  --fold: color-mix(in srgb, #6a3fbf 6%, #ffffff);
+  --fold-hover: color-mix(in srgb, #6a3fbf 10%, #ffffff);
   color-scheme: light;
 }
 @media (prefers-color-scheme: light) {
@@ -71,6 +77,9 @@
     --nb-tag: #6b6b74;
     --nb-apply: #0f766e;
     --nb-user: #7e3fbf;
+  --company: #6a3fbf;
+  --fold: color-mix(in srgb, #6a3fbf 6%, #ffffff);
+  --fold-hover: color-mix(in srgb, #6a3fbf 10%, #ffffff);
     color-scheme: light;
   }
 }
@@ -876,3 +885,112 @@ fieldset.question.unanswered { border-color: var(--danger); box-shadow: 0 0 0 1p
 .prep-q { border-bottom: 1px solid var(--border); padding: 8px 0; }
 .prep-q > summary { cursor: pointer; list-style: none; }
 .prep-q > summary::-webkit-details-marker { display: none; }
+
+/* ---- the model picker (Settings) ---- */
+.model-pick { position: relative; }
+.model-pick input { width: 100%; padding-right: 34px; }
+.model-pick .model-open { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px;
+  padding: 0; display: grid; place-items: center; background: transparent; border: 0; color: var(--muted); font-size: 0.8rem; min-height: 0; }
+.model-pick .model-open:hover { color: var(--text); background: var(--surface); filter: none; }
+/* Under the provider and model boxes, as wide as the form: always room for the name and the price. */
+.model-list { position: relative; width: 100%; margin: 6px 0 4px; max-height: 360px; overflow-y: auto; overflow-x: hidden;
+  overscroll-behavior: contain; padding: 0 0 6px;
+  background: var(--surface-2, var(--surface)); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); }
+.model-group { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
+  padding: 10px 14px 6px; font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted);
+  background: var(--surface-2, var(--surface)); border-bottom: 1px solid var(--border); }
+.model-group .mo-col { font-weight: 400; text-transform: none; letter-spacing: 0; }
+.model-list .model-opt { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; align-items: baseline;
+  justify-items: start; width: 100%; text-align: left; background: none; border: 0; border-radius: 0; margin: 0; padding: 8px 14px;
+  color: var(--text); cursor: pointer; min-height: 0; font: inherit; font-weight: 400; filter: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.model-list .model-opt:hover, .model-list .model-opt:focus-visible { background: color-mix(in srgb, var(--accent) 10%, transparent); outline: none; filter: none; }
+.model-list .model-opt[aria-selected=true] { box-shadow: inset 3px 0 0 var(--accent); }
+.mo-name { font-weight: 600; font-size: 0.9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.mo-price { justify-self: end; font-size: 0.82rem; font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; }
+.mo-price.free { color: var(--ok, #3fb950); font-weight: 600; }
+.mo-id { font-family: var(--mono, ui-monospace, monospace); font-size: 0.76rem; color: var(--muted); overflow-wrap: anywhere; }
+.mo-meta { justify-self: end; font-size: 0.74rem; color: var(--muted); white-space: nowrap; }
+.model-more { padding: 8px 14px; font-size: 0.78rem; color: var(--muted); }
+.model-account { margin-top: 6px; min-height: 1.2em; }
+
+/* ---- which model wrote what: there when you look for it, never in the way ---- */
+.by-model { font-size: 0.68rem; color: var(--muted); opacity: 0.75; margin: 4px 0 0; font-weight: 400; letter-spacing: 0.01em; }
+span.by-model { margin: 0; }
+.ai-chip .ai-model { font-size: 0.68rem; color: var(--muted); opacity: 0.8; max-width: 14ch; overflow: hidden; text-overflow: ellipsis;
+  border-left: 1px solid var(--border); padding-left: 6px; }
+@media (max-width: 900px) { .ai-chip .ai-model { display: none; } }
+.model-account-row { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.model-account-row .model-account { flex: 1; margin-top: 6px; }
+.model-account-row .link-btn { margin-top: 6px; white-space: nowrap; }
+
+/* ================= one look for everything that opens ================= */
+/* Every collapsible header has the same tint and chevron, so you can tell at a glance that it opens. */
+details > summary { border-radius: 6px; }
+/* :where() keeps this at the weight of "details > summary", so a layout's own summary style (the match list, the
+   prep questions) still wins. */
+details:where(:not(.acc, .btn-toggle, .prep-q)) > summary {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px 4px 8px; background: var(--fold); color: var(--text); }
+details:where(:not(.acc, .btn-toggle, .prep-q)) > summary:hover { background: var(--fold-hover); }
+details > summary::before { color: var(--company); }
+details.acc > summary { background: var(--fold); }
+details.acc > summary:hover { background: var(--fold-hover); }
+details.acc[open] > summary { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-bottom: 1px solid var(--border); }
+details.acc > summary::after { border-color: var(--company); }
+.prep-q > summary { background: var(--fold); border-radius: 6px; padding: 6px 10px; }
+.prep-q > summary:hover { background: var(--fold-hover); }
+.match-list summary { background: var(--fold); }
+.match-list summary:hover { background: var(--fold-hover); }
+
+/* ================= company names stand out everywhere ================= */
+.co { color: var(--company); font-weight: 600; }
+a .co, .co a { color: var(--company); }
+
+/* ================= jobs: one board for progress, tabs and filters ================= */
+.board { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); overflow: hidden; margin-bottom: 14px; }
+.board .overall { border: 0; border-radius: 0; background: transparent; padding: 16px 18px 14px; display: grid; gap: 10px; }
+.ov-figure { display: flex; align-items: baseline; gap: 10px; }
+.ov-figure strong { font-family: var(--font-display); font-size: 1.6rem; line-height: 1; }
+.ov-of { color: var(--muted); font-size: 0.88rem; }
+.ov-counts { display: flex; flex-wrap: wrap; gap: 6px; }
+.ov-pill { display: inline-flex; align-items: center; gap: 2px; font-size: 0.8rem; padding: 3px 10px; border-radius: 999px;
+  background: var(--surface-2); color: var(--text); white-space: nowrap; }
+.board-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+  padding: 10px 14px; border-top: 1px solid var(--border); background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); }
+.board-controls .seg { margin: 0; }
+.board-controls .toolbar { margin: 0; flex: 1 1 380px; justify-content: flex-end; }
+.board-controls .toolbar input[type="search"] { max-width: 260px; }
+.table thead th { background: var(--surface-2); color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.7rem;
+  font-weight: 600; padding: 9px 10px; border-bottom: 1px solid var(--border-strong); position: sticky; top: 0; z-index: 1; }
+.table thead th:first-child { border-top-left-radius: 8px; }
+.table thead th:last-child { border-top-right-radius: 8px; }
+
+/* ================= settings: grouped, one subject per section ================= */
+.glance-group { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.07em; color: var(--faint);
+  margin: 18px 0 6px 4px; }
+.glance-group:first-of-type { margin-top: 4px; }
+.section-lead { color: var(--muted); font-size: 0.88rem; margin: -4px 0 14px; }
+.panel-title { font-size: 0.95rem; margin: 0 0 10px; }
+details.about { margin-top: 6px; }
+details.about > summary { font-size: 0.8rem; }
+
+/* ================= profile editor: one line per role until you open it ================= */
+.edit-section + .edit-section { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border); }
+.edit-section h2 .count { font: 600 0.72rem var(--font-mono); color: var(--muted); background: var(--surface-2); border-radius: 999px;
+  padding: 1px 8px; vertical-align: middle; }
+details.edit-role + details.edit-role { margin-top: 6px; }
+details.edit-role > summary { flex-wrap: wrap; row-gap: 2px; }
+.er-title { font-weight: 600; }
+.er-at { color: var(--muted); font-weight: 400; }
+.er-meta { color: var(--muted); font-size: 0.8rem; font-weight: 400; }
+.er-twin { font-size: 0.7rem; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--warn); color: var(--warn); }
+details.edit-role.twin { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }
+details.edit-role .edit-block { border: 0; padding: 0; margin: 0; background: none; }
+.edit-outline { display: grid; gap: 4px; }
+.edit-outline a { display: flex; justify-content: space-between; gap: 10px; padding: 9px 12px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface); color: var(--text); }
+.edit-outline a:hover { border-color: var(--border-strong); text-decoration: none; }
+.save-bar { position: sticky; bottom: 0; padding: 12px 0; background: linear-gradient(transparent, var(--bg) 35%); z-index: 2; }
+details.acc.add-new { margin-top: 8px; border-style: dashed; }
+details.acc.add-new > summary { color: var(--muted); font-weight: 500; }
+details.acc.add-new .edit-block { border: 0; padding: 0; margin: 0; background: none; }

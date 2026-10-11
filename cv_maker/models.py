@@ -88,6 +88,7 @@ class JobRun:
     improve: dict = field(default_factory=dict)
     # A recruiter's reading of each requirement the keyword search didn't settle (jobs/assess.py), by term.
     assessment: dict = field(default_factory=dict)
+    analysed_with: str = ""  # the model that read the job and its match (requirements, the reading, the questions)
 
 
 @dataclass
@@ -140,6 +141,7 @@ class CvUpload:
     text: str
     replace_profile: bool = False
     status: str = "parsing"  # review (waiting for the user to check what is sent) | parsing | ready | failed
+    read_with: str = ""  # the model that read this CV into your profile
     error: str = ""
     summary: dict = field(default_factory=dict)
     # Choices made on the check-before-sending page (see privacy.cv_request).

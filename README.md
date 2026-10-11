@@ -120,6 +120,10 @@ clicking it (or <kbd>`</kbd>) splits the right half again, page's right half abo
 either divider (or focus it and use the arrow keys; double-click resets); the sizes are remembered on this
 computer and set before the page shows, so nothing jumps. On narrow screens the halves stack.
 
+**A model on this computer (Ollama) has no cap and no pace:** nothing is paid or rate-limited, so the daily cap and
+requests-a-minute settings don't apply to it; only "at a time" does, to keep the computer responsive. The header
+shows "Local AI · no limit" with today's count.
+
 **AI left today:** the header shows how many of today's AI requests are left under your daily cap (Settings →
 Pace and automation), or how many were used without one, and the tokens they took; it turns amber at 20% left
 and red when none are. With OpenRouter it also shows your key's remaining credit, as OpenRouter reports it.
@@ -354,6 +358,13 @@ app. You can pause and take over (click and type in the view) at any time, then 
   the field is outlined in the view while you answer. Your answers are kept for the whole application, so a
   site that re-renders its form (Oracle, Workday) or a page you come back to is filled from them, not asked
   again. Tick "save" to reuse an answer on later applications.
+- **Your work history is never guessed:** a question like "Are you an employee at Acme?" or "Have you worked for
+  Acme or its affiliates?" is answered from your profile's roles by a rule, not by the LLM: No unless Acme is one of
+  your employers (and, for "currently", your current one). The LLM also gets the hiring company and where you've
+  worked spelled out, is told never to confuse the two, and gives the profile fact behind each answer, which the
+  log shows next to it.
+- **Saved answers stay private too:** saved answers that hold an address, a PIN or postal code, a phone number, an
+  email or family details reach the LLM only as placeholders, like your contact details.
 - **Passwords and ID numbers are yours to type:** fields for passwords, one-time codes, security answers,
   PINs and ID or bank numbers are never filled from an answer, sent to the LLM, saved or logged. The
   assistant asks you to type them in the view yourself. The only exception is your own sign-in, from your
@@ -406,6 +417,25 @@ address inside it. LinkedIn's own pages are refused there, with the reason shown
 Set the provider on the Settings page (or `LLM_PROVIDER`): `openai`, `azure`, `bedrock`, `ollama`, `groq`, `openrouter`.
 
 Install provider SDK: `pip install "cv-maker[openai]"` (or your provider). `openrouter` and `ollama` need no SDK.
+
+**Which model wrote what:** the header shows the model in use, small, next to "AI left today". Every LLM
+request names its model in the nerdbar, the log and the record of what was sent (Settings → Privacy). Each result
+keeps the model that wrote it, shown in small print where it appears: the CV and letter versions, the job's
+requirements and questions, interview prep, company research, review summaries, ATS-improvement checks, your CV
+read into the profile, and each answer the application assistant had the LLM decide.
+
+**Picking a model:** the Model box is a list. **↻ Refresh list** asks the provider again (lists are otherwise kept for an hour), and the note
+under it says when the list was fetched.
+- **Models you've used** with the chosen provider come first, with how many requests each made today. Switching provider fills in the model you last used with it.
+- **The provider's own list** is fetched each time you switch, and kept for an hour:
+  - **OpenRouter:** every model with its price per million tokens, its context size, and *Free* or *Paid*; no key needed for the list.
+  - **Groq:** its chat models, usable on its free tier within rate limits.
+  - **OpenAI:** its chat models, all paid.
+  - **Ollama:** the models installed on this computer.
+- **Your account:** below the box, what the provider reports, such as OpenRouter credit left and whether your key is on the free tier (50 free-model requests a day).
+- **Retired models:** a warning when your configured model is no longer in the provider's list.
+- **Keys:** a saved key is only ever sent to the provider it was saved for. To list another provider's models, paste its key in the form; it's used for that one request.
+- **Azure and Bedrock:** they list deployments through separate management APIs, so only the models you've used are offered.
 
 | Provider | Needs |
 | --- | --- |

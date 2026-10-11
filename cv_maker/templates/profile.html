@@ -64,7 +64,7 @@
         <p><strong>{{ twins|length }} job{{ 's are' if twins|length != 1 else ' is' }} listed more than once</strong>, in different words
           (two CVs, or a CV and a LinkedIn export). A tailored CV shows each job once, but merging them keeps your profile tidy.</p>
         <ul class="dot-list small mt-xs">{% for group in twins %}
-          <li>{% for e in group %}{{ e.title }} — {{ e.company }} <span class="faint">({{ e.start }})</span>{{ ' · ' if not loop.last }}{% endfor %}</li>{% endfor %}</ul>
+          <li>{% for e in group %}{{ e.title }} — {{ e.company|co }} <span class="faint">({{ e.start }})</span>{{ ' · ' if not loop.last }}{% endfor %}</li>{% endfor %}</ul>
         <form method="post" action="{{ url_for('profile_merge_roles') }}" class="row mt-sm"
               data-confirm="Merge each group into one role? The first entry's title and employer are kept, with every bullet that isn't a repeat.">
           <button type="submit" class="secondary">Merge duplicate roles</button>
@@ -75,7 +75,7 @@
       <div class="panel stale-panel" id="stale">
         <p><strong>{{ stale|length }} job{{ 's were' if stale|length != 1 else ' was' }} written from your earlier profile.</strong>
           Their latest CVs don't have your changes yet.</p>
-        <ul class="dot-list small mt-xs">{% for r, v in stale %}<li><a href="{{ url_for('run_detail', run_id=r.id) }}">{{ job_label(r) }}</a> <span class="faint">· v{{ v }}</span></li>{% endfor %}</ul>
+        <ul class="dot-list small mt-xs">{% for r, v in stale %}<li><a href="{{ url_for('run_detail', run_id=r.id) }}">{{ job_name(r) }}</a> <span class="faint">· v{{ v }}</span></li>{% endfor %}</ul>
         <form method="post" action="{{ url_for('profile_rewrite') }}" class="row mt-sm">
           <button type="submit" data-busy-text="Starting…">Write new versions with your changes</button>
           <span class="small faint">Uses the answers you already gave; earlier versions are kept.</span>
@@ -91,7 +91,7 @@
       <h3 class="mt-lg">Experience</h3>
       {% for e in profile.experiences %}
         <div class="role">
-          <div class="role-head">{{ e.title }} — {{ e.company }}</div>
+          <div class="role-head">{{ e.title }} — {{ e.company|co }}</div>
           <div class="small faint">{{ [e.location, (e.start ~ (' – ' if e.start else '') ~ ('Present' if e.current else (e.end or '')))]|select|join(' · ') }}</div>
           {% if e.bullets %}<ul class="small">{% for b in e.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
         </div>
@@ -160,6 +160,7 @@
                 <td class="small faint nowrap">{{ u.created_at|when }}</td>
                 <td class="small">
                   {% if u.status == 'ready' and u.summary %}{{ (u.summary.get('roles') or [])|length }} roles, {{ (u.summary.get('skills') or [])|length }} skills
+                    {% if u.read_with %}<span class="by-model">· read by {{ u.read_with }}</span>{% endif %}
                   {% elif u.status == 'parsing' %}<span class="pill analyzing">Reading</span>
                   {% elif u.status == 'review' %}<a href="{{ url_for('review_upload', upload_id=u.id) }}">Not sent · check and send</a>
                   {% else %}<span class="error-text">Failed</span>{% endif %}

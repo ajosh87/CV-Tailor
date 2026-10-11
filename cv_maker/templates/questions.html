@@ -6,7 +6,7 @@
     <div>
       <h1>{% if regenerating %}New version{% else %}A few questions{% endif %}</h1>
       <p class="lead">
-        {{ run.title or 'This job' }}{% if run.company %} at {{ run.company }}{% endif %}{% if position %} · job {{ position[0] }} of {{ position[1] }}{% endif %}.
+        {{ run.title or 'This job' }}{% if run.company %} at {{ run.company|co }}{% endif %}{% if position %} · job {{ position[0] }} of {{ position[1] }}{% endif %}.
         {% if regenerating %}Change any answer and write v{{ next_version }}; earlier versions are kept.{% endif %}
       </p>
       {% if position %}

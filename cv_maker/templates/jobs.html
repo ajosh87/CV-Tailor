@@ -34,17 +34,18 @@
 
   {% if any_jobs %}
     <div class="mt-lg">
+      <section class="board" aria-label="Your jobs">
       {% if overall.jobs > 1 %}
         {% set names = {'applied': 'applied', 'ready': 'ready to apply', 'working': 'in progress', 'you': 'need you', 'failed': 'failed'} %}
-        <div class="overall mb-md" id="overall">
-          <div class="spread small">
-            <span><strong id="ov-percent">{{ overall.percent }}%</strong> of the way, across <span id="ov-jobs">{{ overall.jobs }}</span> jobs</span>
-            <span class="muted" id="ov-counts">{% for key, name in names.items() if overall.counts[key] %}<span class="nowrap"><i class="legend-dot {{ key }}"></i>{{ overall.counts[key] }} {{ name }}</span>{{ ' · ' if not loop.last }}{% endfor %}</span>
-          </div>
+        <div class="overall" id="overall">
+          <div class="ov-figure"><strong id="ov-percent">{{ overall.percent }}%</strong>
+            <span class="ov-of">done across <span id="ov-jobs">{{ overall.jobs }}</span> jobs
+              <span class="info" tabindex="0" aria-describedby="ov-info">ⓘ<span class="tip" role="tooltip" id="ov-info">Each job goes: job read → analysed → your answers → CV written → applied. Archived jobs aren't counted.</span></span></span></div>
           <div class="progress-bar" role="progressbar" aria-label="All jobs" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ overall.percent }}" id="ov-bar"><span style="width: {{ overall.percent }}%"></span></div>
-          <p class="small faint mt-xs">Each job goes: job read → analysed → your answers → CV written → applied. Archived jobs aren't counted.</p>
+          <div class="ov-counts" id="ov-counts">{% for key, name in names.items() if overall.counts[key] %}<span class="ov-pill"><i class="legend-dot {{ key }}"></i>{{ overall.counts[key] }} {{ name }}</span>{% endfor %}</div>
         </div>
       {% endif %}
+      <div class="board-controls">
       <nav class="seg" aria-label="Job status">
         {% for key, label in buckets %}
           <a href="{{ url_with(bucket=None if key == 'all' else key) }}" class="{{ 'active' if data.bucket == key }}">{{ label }}<span class="count">{{ data.counts.get(key, 0) }}</span></a>
@@ -67,6 +68,8 @@
         <button type="submit" class="secondary sm">Search</button>
         {% if args.get('q') or args.get('company') or args.get('sort') %}<a href="{{ url_with(q=None, company=None, sort=None) }}" class="small quiet">Clear</a>{% endif %}
       </form>
+      </div>
+      </section>
 
       {% set need_paste = data.rows|selectattr('run.status', 'equalto', 'needs_paste')|list %}
       {% if need_paste|length > 1 %}
@@ -194,9 +197,8 @@
           var bar = document.getElementById('ov-bar');
           bar.setAttribute('aria-valuenow', d.overall.percent); bar.firstElementChild.style.width = d.overall.percent + '%';
           var counts = document.getElementById('ov-counts'); counts.textContent = '';
-          Object.keys(names).filter(function (k) { return d.overall.counts[k]; }).forEach(function (k, i) {
-            if (i) counts.appendChild(document.createTextNode(' · '));
-            var item = document.createElement('span'); item.className = 'nowrap';
+          Object.keys(names).filter(function (k) { return d.overall.counts[k]; }).forEach(function (k) {
+            var item = document.createElement('span'); item.className = 'ov-pill';
             var dot = document.createElement('i'); dot.className = 'legend-dot ' + k;
             item.appendChild(dot); item.appendChild(document.createTextNode(d.overall.counts[k] + ' ' + names[k]));
             counts.appendChild(item);

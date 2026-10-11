@@ -169,7 +169,8 @@ def test_every_page_has_a_right_half_of_its_own(tmp_path):
     app.store.update_run(run)
     right = {"/jobs": ['id="jobs-dock"', "How it works"],  # no profile yet: how it works, beside "Start with your CV"
              "/profile": ["Your CV files", "What happens to your CV"],
-             "/settings": ['id="glance"', 'href="#llm"', "Browser engine", "Password store", 'data-section="automation"'],
+             "/settings": ['id="glance"', 'href="#llm"', "Browser engine", "Apply assistant", 'data-section="automation"',
+                          'data-section="research"', 'data-section="pace"', 'class="glance-group"'],
              "/settings/apply": ['<section id="accounts">', "Add an account you already have"],
              "/documents": ['id="doc-dock"', "Click a document on the left"],
              "/settings/log": ['id="log-dock"', "No errors or warnings in the last day", "Download the log"],

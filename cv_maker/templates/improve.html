@@ -17,6 +17,7 @@
     <div>
       <h1>Improve v{{ state.version }}'s ATS score</h1>
       <p class="lead">{% if base and base.ats %}It scored {{ base.ats.score }} ({{ base.ats.grade|lower }}). {% endif %}Your answers go into your profile as confirmed facts, then v{{ next_version }} is written from them and checked again. Leave anything you don't know empty: nothing is ever made up.</p>
+      {% if state.model %}<p class="by-model">Picks checked by {{ state.model }}</p>{% endif %}
     </div>
   </div>
 
@@ -45,7 +46,7 @@
             {% set name = 'q' ~ ns.n %}{% set ns.n = ns.n + 1 %}
             <div class="improve-q" data-kind="{{ q.kind }}">
               {% if q.kind == 'bullet' %}
-                <label for="{{ name }}"><strong>{{ q.ask }}</strong> <span class="faint">· {{ roles[q.role].title }} at {{ roles[q.role].company }}</span></label>
+                <label for="{{ name }}"><strong>{{ q.ask }}</strong> <span class="faint">· {{ roles[q.role].title }} at {{ roles[q.role].company|co }}</span></label>
                 <textarea id="{{ name }}" name="{{ name }}" rows="2" maxlength="400">{{ q.text }}</textarea>
                 <p class="hint">Edit it to add the number; leave it as it is to skip.</p>
               {% elif q.kind == 'keyword' %}

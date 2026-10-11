@@ -16,7 +16,7 @@ from cv_maker.apply import scout
 from cv_maker.events import feed
 from cv_maker.jobs.batch import apply_fetch_result
 from cv_maker.jobs.fetch import FetchResult
-from cv_maker.llm.chat import ChatModel, LLMError
+from cv_maker.llm.chat import ChatModel, LLMError, model_name
 from cv_maker.models import CvUpload, JobRun
 from cv_maker.pipeline.graph import Pipeline, _prompt_profile, _to_plain, friendly_error
 from cv_maker.privacy import PrivateModel, cv_request, fill_missing_contacts
@@ -121,6 +121,7 @@ class Tasks:
             request = cv_request(upload.text, keep_unused=upload.keep_unused, also_hide=upload.also_hide,
                                  send_as_is=upload.send_as_is)
             model = self.get_model()
+            upload.read_with = model_name(model)
             if isinstance(model, PrivateModel):
                 model = model.with_extra(request["found"], allow=upload.send_as_is)
             parsed = parse_cv_profile(request["text"], model)
@@ -313,7 +314,9 @@ class Tasks:
             return
         try:
             info = self._company_research(run)
-            notes = prep.write_notes(run, _prompt_profile(_to_plain(profile)), self.get_model(), info, profile)
+            model = self.get_model()
+            notes = prep.write_notes(run, _prompt_profile(_to_plain(profile)), model, info, profile)
+            notes["model"] = model_name(model)
             error = ""
         except Exception as exc:
             notes, error = {}, friendly_error(exc)
@@ -337,8 +340,9 @@ class Tasks:
             asked = run.improve
             check = asked.get("check") or {}
             picked = asked.get("picked") or []
+            model = self.get_model()
             try:
-                plan, error = improve.plan(self.get_model(), profile, picked, check, title=run.title, jd_text=run.jd_text), ""
+                plan, error = improve.plan(model, profile, picked, check, title=run.title, jd_text=run.jd_text), ""
                 asks = sum(len(i["questions"]) for i in plan["items"])
                 feed.emit("ok", f"✓ checked {len(picked)} item{'s' if len(picked) != 1 else ''}: "
                                 f"{asks} question{'s' if asks != 1 else ''} for you")
@@ -350,7 +354,7 @@ class Tasks:
                 run = self.store.find_run(run_id)
                 if run is None or (run.improve or {}).get("status") != "checking":
                     return  # cancelled meanwhile
-                run.improve = {**run.improve, "status": "ready", "plan": plan, "error": error}
+                run.improve = {**run.improve, "status": "ready", "plan": plan, "error": error, "model": model_name(model)}
                 self.store.update_run(run)
 
     def _reviews(self, run_id: str, text: str) -> None:
@@ -359,7 +363,9 @@ class Tasks:
             if run is None:
                 return
             try:
-                summary, error = prep.summarise_reviews(text, run.company, self.get_model()), ""
+                model = self.get_model()
+                summary, error = prep.summarise_reviews(text, run.company, model), ""
+                summary["model"] = model_name(model)
             except Exception as exc:
                 summary, error = None, friendly_error(exc)
                 logger.warning("job %s: the review summary failed: %s", run_id[:6], exc, exc_info=True)

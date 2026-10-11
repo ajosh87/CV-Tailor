@@ -8,7 +8,7 @@
   <div class="page-head">
     <div>
       <h1>Applying{% if run and run.title %}: {{ run.title }}{% endif %}</h1>
-      <p class="lead">{% if run and run.company %}{{ run.company }} · {% endif %}attaching CV v{{ application.version }} · started {{ application.created_at|when }}
+      <p class="lead">{% if run and run.company %}{{ run.company|co }} · {% endif %}attaching CV v{{ application.version }} · started {{ application.created_at|when }}
         · <a href="{{ url_for('apply_details_page', next=request.path) }}" class="small">saved answers and accounts</a>
         · <a href="{{ url_for('log_page', ref=application.id[:6], next=request.path) }}" class="small">log</a></p>
     </div>

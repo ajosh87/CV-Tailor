@@ -33,6 +33,10 @@ class Usage:
         self.store.log_llm_call(purpose, text, hidden, usage)
         if not usage or usage.get("cached") or usage.get("failed"):
             return
+        settings = self._settings() or {}
+        if settings.get("LLM_MODEL"):
+            remember_model(self.store, settings.get("LLM_PROVIDER", ""), settings["LLM_MODEL"])
+            self._count_model(f"{settings.get('LLM_PROVIDER', '')}/{settings['LLM_MODEL']}")
         with self._lock:
             today = date.today().isoformat()
             day = self.store.get_preference("llm_tokens_today") or {}
@@ -43,6 +47,23 @@ class Usage:
             day["estimated"] = bool(day.get("estimated") or usage.get("estimated"))
             self.store.set_preference("llm_tokens_today", day)
 
+    def _count_model(self, key: str) -> None:
+        with self._lock:
+            today = date.today().isoformat()
+            day = self.store.get_preference("llm_models_today") or {}
+            if day.get("date") != today:
+                day = {"date": today, "counts": {}}
+            day["counts"][key] = day["counts"].get(key, 0) + 1
+            self.store.set_preference("llm_models_today", day)
+
+    def by_model(self, provider: str) -> dict:
+        """Today's requests per model of `provider`: {model: count}."""
+        day = self.store.get_preference("llm_models_today") or {}
+        if day.get("date") != date.today().isoformat():
+            return {}
+        prefix = f"{provider}/"
+        return {k[len(prefix):]: v for k, v in (day.get("counts") or {}).items() if k.startswith(prefix)}
+
     def today(self, ask_provider: bool = True) -> dict:
         """{"used", "cap", "left", "share_left", "tokens_in", "tokens_out", "estimated", "state", "provider"}."""
         today = date.today().isoformat()
@@ -51,14 +72,15 @@ class Usage:
         tokens = self.store.get_preference("llm_tokens_today") or {}
         if tokens.get("date") != today:
             tokens = {}
-        cap = int(self._limits().get("daily") or 0)
+        limits = self._limits()
+        cap = int(limits.get("daily") or 0)
         left = max(0, cap - used) if cap else None
         provider = self._provider_report() if ask_provider else {}
         share = (left / cap) if cap else None
         state = "out" if left == 0 else "low" if share is not None and share <= 0.2 else "ok"
         if provider.get("credit_left") is not None and provider["credit_left"] <= 0:
             state = "out"
-        return {"used": used, "cap": cap, "left": left, "share_left": share, "tokens_in": int(tokens.get("in", 0)),
+        return {"used": used, "cap": cap, "left": left, "share_left": share, "local": bool(limits.get("local")), "tokens_in": int(tokens.get("in", 0)),
                 "tokens_out": int(tokens.get("out", 0)), "estimated": bool(tokens.get("estimated")), "state": state,
                 "provider": provider}
 
@@ -86,3 +108,23 @@ class Usage:
         with self._lock:
             self._provider, self._provider_at = report, time.monotonic()
         return report
+
+
+REMEMBERED = 12
+
+
+def remember_model(store, provider: str, model: str) -> None:
+    """Keep `model` at the top of the models used with `provider` (for the picker in Settings)."""
+    provider, model = (provider or "").strip(), (model or "").strip()
+    if not provider or not model:
+        return
+    used = store.get_preference("llm_models_used") or {}
+    mine = [m for m in used.get(provider) or [] if m != model]
+    if (used.get(provider) or [None])[0] == model:
+        return  # already first: nothing to write
+    used[provider] = [model] + mine[:REMEMBERED - 1]
+    store.set_preference("llm_models_used", used)
+
+
+def remembered_models(store, provider: str) -> list[str]:
+    return list((store.get_preference("llm_models_used") or {}).get(provider) or [])
