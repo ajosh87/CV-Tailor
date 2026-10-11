@@ -33,7 +33,7 @@ from cv_maker.llm.chat import complete_json, model_name
 
 # Identify honestly, with a URL, as Wikimedia's robot policy (and good manners) require: the project's public page,
 # so site owners can see what the app is and how to reach its maintainers.
-PROJECT_URL = "https://github.com/ajosh87/CV_maker"
+PROJECT_URL = "https://github.com/ajosh87/CV-Tailor"
 USER_AGENT = f"CVTailor/0.1 (+{PROJECT_URL}; personal job-research tool, one person, low volume) httpx/{httpx.__version__}"
 FRESH_DAYS = 14
 VERSION = 2  # research saved by an earlier version, which didn't tell the company from its namesakes, is redone

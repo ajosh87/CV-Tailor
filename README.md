@@ -23,7 +23,7 @@ Tailor your CV and cover letter to each job, honestly, on your own computer.
 You need **Python 3.11 or newer**: get it from [python.org/downloads](https://www.python.org/downloads/).
 On Windows, tick **"Add python.exe to PATH"** during installation.
 
-Then [download this project](https://github.com/ajosh87/CV_maker/archive/refs/heads/main.zip) and unzip it (or `git clone` it).
+Then [download this project](https://github.com/ajosh87/CV-Tailor/archive/refs/heads/main.zip) and unzip it (or `git clone` it).
 
 ### Windows
 
