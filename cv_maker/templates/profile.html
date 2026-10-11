@@ -59,6 +59,18 @@
       <div class="mt-lg">{{ upload_form() }}</div>
     {% endif %}
   {% else %}
+    {% if twins %}
+      <div class="panel stale-panel" id="twins">
+        <p><strong>{{ twins|length }} job{{ 's are' if twins|length != 1 else ' is' }} listed more than once</strong>, in different words
+          (two CVs, or a CV and a LinkedIn export). A tailored CV shows each job once, but merging them keeps your profile tidy.</p>
+        <ul class="dot-list small mt-xs">{% for group in twins %}
+          <li>{% for e in group %}{{ e.title }} — {{ e.company }} <span class="faint">({{ e.start }})</span>{{ ' · ' if not loop.last }}{% endfor %}</li>{% endfor %}</ul>
+        <form method="post" action="{{ url_for('profile_merge_roles') }}" class="row mt-sm"
+              data-confirm="Merge each group into one role? The first entry's title and employer are kept, with every bullet that isn't a repeat.">
+          <button type="submit" class="secondary">Merge duplicate roles</button>
+        </form>
+      </div>
+    {% endif %}
     {% if stale %}
       <div class="panel stale-panel" id="stale">
         <p><strong>{{ stale|length }} job{{ 's were' if stale|length != 1 else ' was' }} written from your earlier profile.</strong>

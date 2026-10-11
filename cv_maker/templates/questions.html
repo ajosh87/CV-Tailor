@@ -21,10 +21,15 @@
     <p class="small muted">Your profile already shows {{ covered|length }} of {{ run.gaps|length }} requirements clearly{% if covered %} ({{ covered|join(', ') }}){% endif %}. <a href="{{ url_for('run_detail', run_id=run.id) }}#based-on">See the evidence for each</a></p>
   {% endif %}
 
-  <form method="post" class="mt-md" id="answers">
+  <form method="post" class="mt-md" id="answers" novalidate>
     {% if run.questions %}
+      <div class="q-progress" id="q-progress" role="status" aria-live="polite">
+        <span class="q-count-text"><strong data-answered>{{ answered_count }}</strong> of {{ run.questions|length }} answered</span>
+        <span class="progress-bar slim"><span data-bar style="width: {{ (100 * answered_count / run.questions|length)|round|int }}%"></span></span>
+        <button type="button" class="link-btn small" data-next-unanswered>Next unanswered</button>
+      </div>
       <p class="small muted" style="margin-bottom: 12px;">
-        Pick your real level for each: it decides how the CV and letter word the skill.
+        Answer every question, so nothing is decided without you reading it. Pick your real level for each: it decides how the CV and letter word the skill.
         <strong>Beginner</strong> reads as “familiar with”, <strong>Intermediate</strong> as “working knowledge of”,
         <strong>Expert</strong> as “expert in”, and it's never described above that. A level adds the skill to your
         profile (you can change it there). <strong>No experience</strong> keeps it off this CV; <strong>Skip</strong> decides nothing.
@@ -33,14 +38,14 @@
       {% for q in run.questions %}
         {% set i = loop.index0 %}
         {% set prev = previous.get(q.term, {}) %}
-        {% set choice = prev.get('choice', 'skip') %}
+        {% set choice = prev.get('choice', '') %}
         {% if q.optional and not ns.optional_open %}
           {% set ns.optional_open = true %}
-          <details class="acc mt-md" data-key="optional-questions" {{ 'open' if previous }}>
+          <details class="acc mt-md" data-key="optional-questions" open>
             <summary>Optional: your level for skills your profile already shows <span class="count">{{ run.questions|selectattr('optional')|list|length }}</span></summary>
             <div class="acc-body"><p class="small muted" style="margin-bottom: 10px;">Your profile shows these, but thinly or in other words. A level only sharpens how the CV words them; skipping changes nothing.</p>
         {% endif %}
-        <fieldset class="panel question" data-q="{{ i }}">
+        <fieldset class="panel question{{ ' unanswered' if missing and i in missing }}" data-q="{{ i }}" id="question-{{ i }}">
           <legend class="sr-only">{{ q.prompt }}</legend>
           <p aria-hidden="true" class="q-text">{{ q.prompt }}
             <span class="tag {{ 'must' if q.required else 'nice' }}">{{ 'must-have' if q.required else 'nice to have' }}</span></p>
@@ -50,7 +55,7 @@
           {% endif %}
           <div class="choice levels mt-sm">
             {% for value, label in [('none', 'No experience'), ('beginner', 'Beginner'), ('intermediate', 'Intermediate'), ('expert', 'Expert'), ('skip', 'Skip')] %}
-              <label><input type="radio" name="answer_{{ i }}" value="{{ value }}" {% if choice == value %}checked{% endif %}>{{ label }}</label>
+              <label><input type="radio" name="answer_{{ i }}" value="{{ value }}" required {% if choice == value %}checked{% endif %}>{{ label }}</label>
             {% endfor %}
           </div>
           <div class="detail mt-sm">
@@ -115,6 +120,42 @@
 {% endblock %}
 {% block scripts %}
 <script>
+  // Every question needs an answer you chose (Skip is one): a count of how many are done, a jump to the next one, and
+  // no submitting until all are answered.
+  (function () {
+    var form = document.getElementById('answers'), box = document.getElementById('q-progress');
+    if (!form || !box) return;
+    var sets = Array.prototype.slice.call(form.querySelectorAll('fieldset.question'));
+    function unanswered() { return sets.filter(function (fs) { return !fs.querySelector('input[type=radio]:checked'); }); }
+    function update() {
+      var left = unanswered(), done = sets.length - left.length;
+      box.querySelector('[data-answered]').textContent = done;
+      box.querySelector('[data-bar]').style.width = Math.round(100 * done / Math.max(1, sets.length)) + '%';
+      box.classList.toggle('complete', !left.length);
+      box.querySelector('[data-next-unanswered]').hidden = !left.length;
+      sets.forEach(function (fs) { if (fs.querySelector('input[type=radio]:checked')) fs.classList.remove('unanswered'); });
+    }
+    function jump() {
+      var first = unanswered()[0];
+      if (!first) return;
+      var acc = first.closest('details'); if (acc) acc.open = true;
+      first.classList.add('unanswered');
+      first.scrollIntoView({block: 'center', behavior: 'smooth'});
+      var radio = first.querySelector('input[type=radio]'); if (radio) radio.focus({preventScroll: true});
+    }
+    form.addEventListener('change', update);
+    box.querySelector('[data-next-unanswered]').addEventListener('click', jump);
+    form.addEventListener('submit', function (e) {
+      var left = unanswered();
+      if (!left.length) return;
+      e.preventDefault();
+      left.forEach(function (fs) { fs.classList.add('unanswered'); });
+      if (window.CVToast) window.CVToast.show('warn', left.length + ' question' + (left.length > 1 ? 's are' : ' is') + ' still unanswered. Pick an answer for each (Skip counts).');
+      jump();
+    }, true);
+    update();
+  })();
+
   // The question you're on lights up its skill in the posting on the right, with your profile's evidence for it.
   (function () {
     var dock = document.getElementById('q-dock');

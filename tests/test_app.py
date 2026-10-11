@@ -347,7 +347,7 @@ def test_new_version_keeps_earlier_files(app):
 
     page = client.get(f"/runs/{run.id}/questions").data
     assert b"New version" in page and b"Write v2" in page
-    assert b'value="skip" checked' in page  # previous answers are pre-filled
+    assert b'value="skip" required checked' in page  # previous answers are pre-filled
 
     res = client.post(f"/runs/{run.id}/questions", data={"answer_0": "intermediate", "generate_letter": "1"})
     assert res.headers["Location"].endswith(f"/runs/{run.id}")

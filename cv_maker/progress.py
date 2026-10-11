@@ -128,7 +128,7 @@ def section_states(run, *, versions: list[dict], gaps: list[dict], applications:
         out["applying"] = {"tone": "ok", "label": "Ready to apply"}
     prep = run.prep or {}
     if "prep" in busy:
-        out["prep"] = {"tone": "busy", "label": "After the CV" if run.status == "generating" else "Writing…"}
+        out["prep"] = {"tone": "busy", "label": "Writing…"}
     elif prep.get("notes"):
         out["prep"] = {"tone": "ok", "label": "Ready"}
     elif prep.get("error"):

@@ -37,6 +37,13 @@
             <a href="{{ url_for(key) }}" class="{{ 'active' if section == key }}"{% if section == key %} aria-current="page"{% endif %}>{{ label }}</a>
           {% endfor %}
         </nav>
+        {% set u = ai_today %}
+        <a href="{{ url_for('settings') }}#pace" class="ai-chip st-{{ u.state }}" id="ai-usage" data-state="{{ u.state }}"
+           title="{% if u.cap %}{{ u.used }} of your {{ u.cap }} AI requests used today ({{ u.left }} left). {% else %}{{ u.used }} AI requests today, no daily cap set. {% endif %}Tokens today: {{ u.tokens_in }} in, {{ u.tokens_out }} out. Change the cap in Settings.">
+          <span class="ai-dot" aria-hidden="true"></span>
+          <span class="ai-text">{% if u.cap %}AI left today <strong data-ai="left">{{ u.left }}</strong><span class="faint">/{{ u.cap }}</span>{% else %}AI today <strong data-ai="used">{{ u.used }}</strong> req{% endif %}</span>
+          <span class="ai-extra faint" data-ai="extra"></span>
+        </a>
         <form method="post" action="{{ url_for('set_theme') }}" class="theme-form">
           <input type="hidden" name="next" value="{{ request.full_path }}">
           <button type="submit" name="theme" value="{{ next_theme }}" class="ghost sm theme-btn"
@@ -57,7 +64,8 @@
         <div id="flashes" data-part="flash">
           {%- with messages = get_flashed_messages(with_categories=true) %}
             {%- for category, msg in messages if not (page_notes and '|' in category and category.split('|')[1] in page_notes) %}
-              <div class="flash {{ 'error' if category.split('|')[0] == 'error' }}" role="{{ 'alert' if category.split('|')[0] == 'error' else 'status' }}">{{ msg }}</div>
+              {%- set kind = {'error': 'error', 'success': 'success', 'warn': 'warn', 'warning': 'warn'}.get(category.split('|')[0], 'info') %}
+              <div class="flash t-{{ kind }}{{ ' error' if kind == 'error' }}" role="{{ 'alert' if kind == 'error' else 'status' }}">{{ msg }}</div>
             {%- endfor %}
           {%- endwith %}
         </div>
@@ -94,6 +102,7 @@
           title="nerdbar: see what the app is doing (press `)"><span class="nb-dot" aria-hidden="true"></span>&gt;_ nerdbar<span class="nb-now"></span><span class="nb-count"></span></button>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
   <script src="{{ url_for('static', filename='layout.js') }}"></script>
+  <script src="{{ url_for('static', filename='notify.js') }}"></script>
   <script src="{{ url_for('static', filename='nerdbar.js') }}"></script>
   {% block scripts %}{% endblock %}
 </body>

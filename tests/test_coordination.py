@@ -716,10 +716,14 @@ def test_the_app_checks_applications_after_analysis_and_writes_prep_after_the_cv
         assert 'name="apply_alongside"' in questions and "Fill in the application on acme.com while" in questions
     else:  # the optional browser engine isn't installed: the toggle is replaced by the reason
         assert 'name="apply_alongside"' not in questions and "the browser engine isn&#39;t installed" in questions
-    client.post(f"/runs/{run.id}/questions", data={"apply_alongside": "1"})
+    skip_all = {f"answer_{i}": "skip" for i in range(len(app.store.get_run(run.id).questions))}
+    client.post(f"/runs/{run.id}/questions", data={**skip_all, "apply_alongside": "1"})
     assert alongside == [(run.id, 1)]
     done = app.store.get_run(run.id)
-    assert done.status == "ready" and done.prep["notes"]["brush_up"][0]["topic"] == "Kubernetes"
+    assert done.status == "ready" and not done.prep.get("notes")  # interview prep only when you ask
+    client.post(f"/runs/{run.id}/prep")
+    done = app.store.get_run(run.id)
+    assert done.prep["notes"]["brush_up"][0]["topic"] == "Kubernetes"
 
     page = client.get(f"/runs/{run.id}").data.decode()
     assert "<h2>Applying</h2>" in page and "Applications close 15 October" in page
