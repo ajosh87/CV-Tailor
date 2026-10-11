@@ -43,10 +43,13 @@ from cv_maker.settings import (SETTING_KEYS, automation_settings, effective_sett
 from cv_maker.profile.merge import duplicate_groups, merge_duplicates
 from cv_maker.store import Store, profile_signature
 from cv_maker.tasks import Runner, Tasks
-from cv_maker.usage import Usage
+from cv_maker.llm import catalog
+from cv_maker.usage import Usage, remember_model, remembered_models
 
 logger = logging.getLogger("cv_maker")
 
+PROVIDER_NAMES = {"openai": "OpenAI", "azure": "Azure OpenAI", "azure-foundry": "Azure OpenAI", "bedrock": "Bedrock",
+                  "ollama": "Ollama", "groq": "Groq", "openrouter": "OpenRouter"}
 STATUS_LABELS = {
     "fetching": "Fetching",
     "needs_paste": "Needs description",
@@ -120,6 +123,18 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
     app.jinja_env.filters["hidden_summary"] = describe_hidden
     app.jinja_env.filters["mark_terms"] = _mark_terms
     app.jinja_env.globals["job_label"] = job_label
+
+    def company_name(name) -> Markup:
+        """A company's name, marked so it stands out the same way everywhere (escaped like any text)."""
+        return Markup('<span class="co">{}</span>').format(name) if name else Markup("")
+
+    def job_name(run) -> Markup:
+        """'Title at Company', with the company marked."""
+        title = run.title or (run.job_url or "A job")
+        return Markup("{} at {}").format(title, company_name(run.company)) if run.company else Markup("{}").format(title)
+
+    app.jinja_env.filters["co"] = company_name
+    app.jinja_env.globals["job_name"] = job_name
     app.jinja_env.globals["ats_weights"] = ats.WEIGHTS
     app.jinja_env.filters["placeholders"] = lambda text: Markup(
         PLACEHOLDER_TEXT.sub(lambda m: f'<mark class="ph">{m.group()}</mark>', str(escape(text))))
@@ -177,7 +192,8 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
         if model_factory is not None:
             return "custom model"
         values, _ = effective_settings(data_dir)
-        return f"{values.get('LLM_PROVIDER')} · {values.get('LLM_MODEL')}"
+        provider = values.get("LLM_PROVIDER") or ""
+        return f"{PROVIDER_NAMES.get(provider, provider)} · {values.get('LLM_MODEL') or 'default model'}"
 
     def engine_ready() -> bool:
         return importlib.util.find_spec("playwright") is not None
@@ -274,6 +290,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             "llm_configured": g.llm_configured,
             "theme": g.theme, "themes": THEMES, "next_theme": _NEXT_THEME[g.theme],
             "ai_today": usage.today(ask_provider=False),  # the provider's own figure arrives with the first refresh
+            "ai_model": describe_model() if g.llm_configured else "",
         }
 
     @app.template_global()
@@ -327,7 +344,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
     @app.route("/api/usage")
     def api_usage():
         """Today's AI use and what's left, for the header (this computer only; OpenRouter is asked about its own key)."""
-        return jsonify(usage.today())
+        return jsonify({**usage.today(), "model": describe_model()})
 
     @app.route("/api/events")
     def api_events():
@@ -463,7 +480,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
                 for problem in problems:
                     flash(problem, "error")
                 return render_template("profile_edit.html", profile=draft, links_text=links_text(draft.links),
-                                       extra_lists=EXTRA_LISTS, source=latest_source()), 400
+                                       extra_lists=EXTRA_LISTS, source=latest_source(), twins=[], twin_of={}), 400
             with store.locked():  # don't overwrite a confirmation a running job saved meanwhile
                 store.save_profile(profile_from_form(request.form, store.get_profile()))
             waiting = len(stale_runs())
@@ -471,8 +488,10 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
                                       "write new versions from the Profile page or each job." if waiting else
                                       " New CVs will use these facts; existing versions are unchanged."), "success")
             return redirect(url_for("profile"))
+        groups = duplicate_groups(saved) if saved else []
+        twin_of = {i: f"{saved.experiences[g[0]].title} at {saved.experiences[g[0]].company}" for g in groups for i in g[1:]}
         return render_template("profile_edit.html", profile=saved, links_text=links_text(saved.links) if saved else "",
-                               extra_lists=EXTRA_LISTS, source=latest_source())
+                               extra_lists=EXTRA_LISTS, source=latest_source(), twins=groups, twin_of=twin_of)
 
     @app.route("/profile/retry", methods=["POST"])
     def profile_retry():
@@ -1359,14 +1378,22 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
 
     @app.route("/settings/automation", methods=["POST"])
     def settings_automation():
-        values = {key: request.form.get(key, "").strip() for key in ("LLM_RPM", "LLM_CONCURRENCY", "LLM_DAILY_CAP")}
-        problems = validate.pace(values)
-        if problems:
-            for problem in problems:
-                flash(problem + " Nothing was saved.", "error")
-            return redirect(url_for("settings") + "#automation")
-        values.update({key: "1" if request.form.get(key) else "0"
-                       for key in ("SCAN_APPLICATIONS", "APPLY_ALONGSIDE", "RESEARCH_AUTO")})
+        # Each section of the page saves only its own settings (an unticked box sends nothing, so a section must not
+        # switch off the boxes of another). A form without "section" (older pages, tests) saves them all.
+        parts = set(request.form.getlist("section")) or {"pace", "automation", "research", "politeness"}
+        back = url_for("settings") + "#" + (next(iter(parts)) if len(parts) == 1 else "pace")
+        values = {}
+        if "pace" in parts:
+            values = {key: request.form.get(key, "").strip() for key in ("LLM_RPM", "LLM_CONCURRENCY", "LLM_DAILY_CAP")}
+            problems = validate.pace(values)
+            if problems:
+                for problem in problems:
+                    flash(problem + " Nothing was saved.", "error")
+                return redirect(back)
+        if "automation" in parts:
+            values.update({key: "1" if request.form.get(key) else "0" for key in ("SCAN_APPLICATIONS", "APPLY_ALONGSIDE")})
+        if "research" in parts:
+            values["RESEARCH_AUTO"] = "1" if request.form.get("RESEARCH_AUTO") else "0"
         if request.form.get("RESEARCH_DEPTH") in research.DEPTHS:
             values["RESEARCH_DEPTH"] = request.form["RESEARCH_DEPTH"]
         if request.form.get("POLITENESS") in polite.LEVELS:
@@ -1376,7 +1403,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
         new_key = request.form.get("TAVILY_API_KEY", "").strip()
         if new_key and not research.TAVILY_KEY.fullmatch(new_key):
             flash("That doesn't look like a Tavily key (they start with tvly-). Nothing was saved.", "error")
-            return redirect(url_for("settings") + "#automation")
+            return redirect(back)
         extra = ""
         if new_key and not tavily_key(data_dir)[0] and request.form.get("sources_shown"):
             chosen = [s for s in values["RESEARCH_SOURCES"].split(",") if s]
@@ -1389,8 +1416,8 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             extra = " The Tavily key was removed."
         elif new_key:
             save_tavily_key(data_dir, new_key)
-        flash("Saved. The new limits apply to the next request." + extra)
-        return redirect(url_for("settings") + "#automation")
+        flash("Saved." + (" The new limits apply to the next request." if "pace" in parts else "") + extra, "success")
+        return redirect(back)
 
     @app.route("/settings/tavily/test", methods=["POST"])
     def tavily_test():
@@ -1405,7 +1432,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
     @app.route("/settings/cache/clear", methods=["POST"])
     def clear_cache():
         flash(f"Forgot {store.clear_llm_cache()} earlier answer(s). Repeated requests will go to the LLM again.", "success")
-        return redirect(url_for("settings") + "#automation")
+        return redirect(url_for("settings") + "#pace")
 
     @app.route("/settings/apply", methods=["GET", "POST"])
     def apply_details_page():
@@ -1492,6 +1519,23 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
     def _form_settings() -> dict:
         return {key: request.form.get(key, "") for key in SETTING_KEYS}
 
+    @app.route("/settings/models", methods=["POST"])
+    def settings_models():
+        """The picker's list for one provider: models you've used with it, what the provider offers (free or paid,
+        with prices), your use of each today, and what the provider reports about your account. A key typed in the
+        form is used for this request only; a saved key only for the provider it was saved with."""
+        body = request.get_json(silent=True) or {}
+        provider = str(body.get("provider") or "").strip().casefold()
+        values, _ = effective_settings(data_dir)
+        typed_key = str(body.get("key") or "").strip()
+        key = typed_key or (values.get("LLM_API_KEY") or "" if provider == (values.get("LLM_PROVIDER") or "").casefold() else "")
+        host = str(body.get("host") or "").strip() or values.get("OLLAMA_HOST") or ""
+        found = catalog.models(provider, key, host if provider == "ollama" else "", refresh=bool(body.get("refresh")))
+        if found["error"] and not typed_key and provider != (values.get("LLM_PROVIDER") or "").casefold() and provider in ("groq", "openai"):
+            found["error"] = f"paste your {provider.capitalize() if provider == 'groq' else 'OpenAI'} API key above to list its models"
+        return jsonify({"provider": provider, "remembered": remembered_models(store, provider), "today": usage.by_model(provider),
+                        **found})
+
     @app.route("/settings", methods=["GET", "POST"])
     def settings():
         typed = None
@@ -1501,6 +1545,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             if not problems:
                 saved = save_settings(data_dir, typed, clear_api_key=bool(request.form.get("clear_api_key")))
                 logger.info("Settings updated provider=%s model=%s", saved.get("LLM_PROVIDER"), saved.get("LLM_MODEL"))
+                remember_model(store, saved.get("LLM_PROVIDER", ""), saved.get("LLM_MODEL", ""))
                 flash("Settings saved. They apply to the next step that uses the LLM.", "success")
                 return redirect(url_for("settings"))
             for problem in problems:

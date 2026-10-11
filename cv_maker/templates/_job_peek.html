@@ -7,7 +7,7 @@
     <span class="small faint push-right">updated {{ run.updated_at|when }}</span>
   </div>
   <h2 class="peek-title"><a href="{{ url_for('run_detail', run_id=run.id) }}" class="plain">{{ run.title or ('Pasted job' if not run.job_url else 'Job') }}</a></h2>
-  <p class="small muted">{{ run.company or '' }}{% if run.company and run.job_url %} · {% endif %}{% if run.job_url %}<a href="{{ run.job_url }}" target="_blank" rel="noopener noreferrer">{{ host(run.job_url) }} ↗</a>{% endif %}</p>
+  <p class="small muted">{{ run.company|co }}{% if run.company and run.job_url %} · {% endif %}{% if run.job_url %}<a href="{{ run.job_url }}" target="_blank" rel="noopener noreferrer">{{ host(run.job_url) }} ↗</a>{% endif %}</p>
 
   {% set p = progress %}
   <p class="small mt-sm">{% if run.status in ('fetching', 'analyzing', 'generating') %}<span class="spinner" aria-hidden="true"></span> {{ run.step or 'Working…' }}

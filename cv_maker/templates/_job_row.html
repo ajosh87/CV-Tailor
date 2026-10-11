@@ -5,7 +5,7 @@
   <td class="check-cell"><input type="checkbox" name="run_id" value="{{ run.id }}" class="row-check" aria-label="Select {{ row.label }}"></td>
   <td>
     <a href="{{ url_for('run_detail', run_id=run.id) }}" class="row-title break">{{ row.label|truncate(80, True) }}</a>
-    <div class="small muted">{{ run.company or '' }}{% if run.company and run.job_url %} · {% endif %}{% if run.job_url %}{{ host(run.job_url) }}{% elif not run.company %}pasted{% endif %}</div>
+    <div class="small muted">{{ run.company|co }}{% if run.company and run.job_url %} · {% endif %}{% if run.job_url %}{{ host(run.job_url) }}{% elif not run.company %}pasted{% endif %}</div>
   </td>
   <td>{{ status_pill(run) }}{% if row.applied %}<div class="small ok-text">Applied</div>{% endif %}
     {% for kind in row.busy or [] %}<div class="busy-note"><span class="spinner" aria-hidden="true"></span>{{ {'prep': 'prep notes', 'research': 'company research', 'scan': 'checking the application', 'reviews': 'summarising reviews', 'improve': 'checking improvements'}.get(kind, kind) }}</div>{% endfor %}

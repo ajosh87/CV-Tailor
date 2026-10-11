@@ -295,7 +295,9 @@
       tr.appendChild(el('td', {class: 'faint'}, f.page));
       tr.appendChild(el('td', {}, f.label));
       tr.appendChild(el('td', {class: 'break'}, f.value));
-      tr.appendChild(el('td', {class: 'faint nowrap'}, {rule: 'saved details', llm: 'LLM', you: 'you'}[f.source] || f.source));
+      var by = el('td', {class: 'faint nowrap'}, {rule: 'saved details', llm: 'LLM', you: 'you'}[f.source] || f.source);
+      if (f.model) { by.title = 'Decided by ' + f.model; by.appendChild(el('div', {class: 'by-model'}, f.model)); }
+      tr.appendChild(by);
       body.appendChild(tr);
     });
   }

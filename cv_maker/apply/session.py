@@ -21,7 +21,7 @@ from cv_maker.events import feed
 from cv_maker import tenure
 from cv_maker.honesty import allowed_facts_text, allowed_numbers_text, filter_text
 from cv_maker.jobs import polite
-from cv_maker.llm.chat import LLMError, ProviderUnsetError, complete_json
+from cv_maker.llm.chat import LLMError, ProviderUnsetError, complete_json, model_name
 from cv_maker.pipeline.graph import _prompt_profile, _to_plain, friendly_error
 from cv_maker.privacy import PrivateModel, mask
 
@@ -291,9 +291,13 @@ class ApplySession(threading.Thread):
                 self._wait_for_you("stuck", "The assistant keeps getting interrupted on this page. Have a look, then press Resume.")
 
     def _details_now(self) -> dict:
-        """Your saved details, with the answers you gave during this application first."""
+        """Your saved details, with the answers you gave during this application first, plus where you've worked
+        and who is hiring: questions about working there are answered from your roles, never guessed."""
         mine = [{"question": q, "answer": a} for q, a in self._answers.items()]
-        return {**self._details, "custom": mine + list(self._details.get("custom") or [])}
+        profile, run = self.store.get_profile(), self.store.find_run(self.run_id)
+        employers = [{"company": e.company, "title": e.title, "current": bool(e.current)} for e in (profile.experiences if profile else [])]
+        return {**self._details, "custom": mine + list(self._details.get("custom") or []), "employers": employers,
+                "hiring": (run.company if run else "") or ""}
 
     def _step(self) -> None:
         if self._interrupted():
@@ -430,6 +434,7 @@ class ApplySession(threading.Thread):
     def _ask_llm(self, info: dict, fields: list) -> planner.Plan:
         profile = self.store.get_profile()
         model = self.get_model()
+        self._model_name = model_name(model)
         if isinstance(model, PrivateModel):
             model = model.with_extra(self._secrets)
         prompt = planner.build_prompt(info, fields, _prompt_profile(_to_plain(profile)) if profile else "{}", self._details_now(),
@@ -474,10 +479,12 @@ class ApplySession(threading.Thread):
                 continue
             self._not_kept.pop(planner.norm_label(what), None)
             shown = HIDDEN if secret else self._shown(action.shown or action.value)
-            feed.emit("apply", f"{what[:60]} ← {shown[:80]}" + (" · by rule" if action.source == "rule" else ""))
+            why = f" · {self._shown(action.why)[:100]}" if getattr(action, "why", "") and not secret else ""
+            feed.emit("apply", f"{what[:60]} ← {shown[:80]}" + (" · by rule" if action.source == "rule" else "") + why)
             self.page.wait_for_timeout(polite.level()["field_pause_ms"])
             value = HIDDEN if secret else action.value if action.op != "upload" else action.shown
-            filled.append({"page": info.get("title") or "", "label": what, "value": value, "source": action.source})
+            filled.append({"page": info.get("title") or "", "label": what, "value": value, "source": action.source,
+                           **({"model": getattr(self, "_model_name", "")} if action.source == "llm" else {})})
             self._snap(force=True)
         self.target = None
         if filled:

@@ -12,7 +12,7 @@
     {% for run in runs %}
       <div class="panel">
         <div class="spread">
-          <strong>{{ run.title or 'Job' }}{% if run.company %} <span class="muted">· {{ run.company }}</span>{% endif %}</strong>
+          <strong>{{ run.title or 'Job' }}{% if run.company %} <span class="muted">· {{ run.company|co }}</span>{% endif %}</strong>
           {% if run.job_url %}<a href="{{ run.job_url }}" target="_blank" rel="noopener noreferrer" class="small">Open posting ↗</a>{% endif %}
         </div>
         {% if run.fetch_reason %}<p class="small muted mt-xs">{{ run.fetch_reason }}</p>{% endif %}

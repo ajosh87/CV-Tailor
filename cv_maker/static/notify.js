@@ -82,7 +82,11 @@
     var text = chip.querySelector('.ai-text'), extra = chip.querySelector('[data-ai=extra]');
     text.textContent = '';
     var strong = document.createElement('strong');
-    if (u.cap) {
+    if (u.local) {
+      text.appendChild(document.createTextNode('Local AI '));
+      strong.textContent = u.used; text.appendChild(strong);
+      var nl = document.createElement('span'); nl.className = 'faint'; nl.textContent = ' today · no limit'; text.appendChild(nl);
+    } else if (u.cap) {
       text.appendChild(document.createTextNode('AI left today '));
       strong.textContent = u.left; text.appendChild(strong);
       var of = document.createElement('span'); of.className = 'faint'; of.textContent = '/' + u.cap; text.appendChild(of);
@@ -90,16 +94,18 @@
       text.appendChild(document.createTextNode('AI today '));
       strong.textContent = u.used; text.appendChild(strong); text.appendChild(document.createTextNode(' req'));
     }
+    var shown = chip.querySelector('[data-ai=model]');
+    if (shown && u.model) shown.textContent = u.model.split(' · ').pop();
     var p = u.provider || {}, bits = [];
     if (p.credit_left != null) bits.push('$' + p.credit_left.toFixed(2) + ' credit');
     extra.textContent = bits.length ? '· ' + bits.join(' · ') : '';
     var tokens = (u.estimated ? '~' : '') + u.tokens_in.toLocaleString() + ' in, ' + (u.estimated ? '~' : '') + u.tokens_out.toLocaleString() + ' out';
-    chip.title = (u.cap ? u.used + ' of your ' + u.cap + ' AI requests used today (' + u.left + ' left). ' : u.used + ' AI requests today, no daily cap set. ') +
+    chip.title = u.local ? u.used + ' requests today to the model on this computer: no cap and no pace, since nothing is paid or rate-limited. Tokens today: ' + tokens + '.' : (u.cap ? u.used + ' of your ' + u.cap + ' AI requests used today (' + u.left + ' left). ' : u.used + ' AI requests today, no daily cap set. ') +
       'Tokens today: ' + tokens + '.' +
       (p.name ? ' ' + p.name + (p.unavailable ? ': its own figures could not be read right now.' :
         (p.free_tier ? ': free tier, about ' + p.free_daily + ' free-model requests a day.' : '') +
         (p.credit_left != null ? ' Credit left: $' + p.credit_left.toFixed(2) + '.' : '')) : '') +
-      ' The count resets at midnight. Change the cap in Settings.';
+      ' The count resets at midnight. Change the cap in Settings.' + (u.model ? ' Model in use: ' + u.model + '.' : '');
   }
   function refresh() {
     clearTimeout(pending);

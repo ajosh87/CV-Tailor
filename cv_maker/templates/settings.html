@@ -9,38 +9,45 @@
   <div class="page-head">
     <div>
       <h1>Settings</h1>
-      <p class="lead">How the app is set up, at a glance. Pick a line to change it on the right; changes apply right away, and values saved here take priority over <code>.env</code>.</p>
+      <p class="lead">Pick a line to change it on the right. Values saved here take priority over <code>.env</code>.</p>
     </div>
   </div>
 
 {% set providers = {'openai': 'OpenAI', 'azure': 'Azure OpenAI', 'bedrock': 'AWS Bedrock', 'ollama': 'Ollama (on this computer)', 'groq': 'Groq', 'openrouter': 'OpenRouter'} %}
 <div class="glance" id="glance">
   <h2 class="sr-only">At a glance</h2>
+  {% set auto = [] %}
+  {% if automation.SCAN_APPLICATIONS == '1' %}{% set _ = auto.append('checks applications') %}{% endif %}
+  {% if automation.APPLY_ALONGSIDE == '1' %}{% set _ = auto.append('applies alongside') %}{% endif %}
+  <h3 class="glance-group">AI</h3>
   <ul class="glance-list">
-    {{ glance('ok' if llm_configured else 'attn', 'LLM', (providers.get(settings.LLM_PROVIDER, settings.LLM_PROVIDER) ~ ' · ' ~ (settings.LLM_MODEL or 'no model')) if llm_configured else 'Not set up: CVs can\'t be read or written yet', 'llm', key_hint and 'key ' ~ key_hint.split(' ')[0]) }}
-    {{ glance('ok', 'Pace', (limits.rpm ~ ' a minute' if limits.rpm else 'no per-minute limit') ~ ' · ' ~ limits.concurrency ~ ' at a time', 'automation', used_today ~ ' requests today') }}
-    {% set auto = [] %}
-    {% if automation.SCAN_APPLICATIONS == '1' %}{% set _ = auto.append('checks applications') %}{% endif %}
-    {% if automation.RESEARCH_AUTO == '1' %}{% set _ = auto.append('researches companies') %}{% endif %}
-    {% if automation.APPLY_ALONGSIDE == '1' %}{% set _ = auto.append('applies alongside') %}{% endif %}
-    {{ glance('ok' if auto else 'idle', 'Automation', ('By itself it ' ~ auto|join(', ')) if auto else 'Everything waits for you to ask', 'automation') }}
-    {{ glance('idle' if automation.RESEARCH_DEPTH == 'off' else 'ok', 'Company research', automation.RESEARCH_DEPTH|capitalize ~ (' · ' ~ chosen_sources|length ~ ' sources' if automation.RESEARCH_DEPTH != 'off' else ''), 'automation') }}
-    {{ glance('ok' if tavily_hint else 'idle', 'Tavily key', ('Saved (' ~ tavily_hint ~ ')') if tavily_hint else 'Not added (optional: news and what people say)', 'automation') }}
-    {{ glance('ok', 'Politeness', levels[automation.POLITENESS].label if automation.POLITENESS in levels else automation.POLITENESS, 'automation', 'how fast it visits websites') }}
-    {{ glance('ok' if engine else 'attn', 'Browser engine', 'Installed: applications can be checked and filled in' if engine else 'Not installed: pip install playwright, then python -m playwright install chromium', 'apply-assistant') }}
-    {{ glance('ok' if keychain else 'attn', 'Password store', (keychain ~ ' · ' ~ accounts|length ~ ' account' ~ ('' if accounts|length == 1 else 's')) if keychain else 'Not available: install the apply extras (pip install -e ".[apply]") to keep job-site passwords', 'apply-assistant') }}
+    {{ glance('ok' if llm_configured else 'attn', 'Model', (providers.get(settings.LLM_PROVIDER, settings.LLM_PROVIDER) ~ ' · ' ~ (settings.LLM_MODEL or 'no model')) if llm_configured else 'Not set up: CVs can\'t be read or written yet', 'llm', key_hint and 'key ' ~ key_hint.split(' ')[0]) }}
+    {{ glance('ok', 'Pace', ('no cap · on this computer' if limits.local else ((limits.rpm ~ ' a minute' if limits.rpm else 'no per-minute limit') ~ ' · ' ~ (limits.daily ~ ' a day' if limits.daily else 'no daily cap'))), 'pace', used_today ~ ' requests today') }}
+  </ul>
+  <h3 class="glance-group">Working for you</h3>
+  <ul class="glance-list">
+    {{ glance('ok' if auto else 'idle', 'Automation', ('By itself it ' ~ auto|join(' and ')) if auto else 'Everything waits for you to ask', 'automation') }}
+    {{ glance('idle' if automation.RESEARCH_DEPTH == 'off' else 'ok', 'Company research', automation.RESEARCH_DEPTH|capitalize ~ (' · ' ~ chosen_sources|length ~ ' sources' if automation.RESEARCH_DEPTH != 'off' else '') ~ (' · runs by itself' if automation.RESEARCH_AUTO == '1' else ''), 'research', 'Tavily key saved' if tavily_hint else '') }}
+    {{ glance('ok', 'Politeness', levels[automation.POLITENESS].label if automation.POLITENESS in levels else automation.POLITENESS, 'politeness', 'how fast it visits websites') }}
+  </ul>
+  <h3 class="glance-group">Applying</h3>
+  <ul class="glance-list">
+    {{ glance('ok' if engine and keychain else 'attn', 'Apply assistant', ('Browser engine installed' if engine else 'Browser engine not installed') ~ ' · ' ~ ((keychain ~ ', ' ~ accounts|length ~ ' account' ~ ('' if accounts|length == 1 else 's')) if keychain else 'no password store'), 'apply-assistant') }}
+  </ul>
+  <h3 class="glance-group">Privacy and your data</h3>
+  <ul class="glance-list">
     {{ glance('ok', 'Privacy', 'Contact details always hidden' ~ (' · ' ~ never_send|length ~ ' more on the never-send list' if never_send else ''), 'privacy', sent_count ~ ' recent requests recorded') }}
     {{ glance('bad' if problems.errors else 'attn' if problems.warnings else 'ok', 'Log', (problems.errors ~ ' error' ~ ('' if problems.errors == 1 else 's') ~ ', ' ~ problems.warnings ~ ' warning' ~ ('' if problems.warnings == 1 else 's') ~ ' in the last day') if problems.errors or problems.warnings else 'No errors or warnings in the last day', 'log') }}
-    {{ glance('idle', 'Appearance', themes[theme][0], 'appearance') }}
     {{ glance('idle', 'Your data', counts.jobs ~ ' job' ~ ('' if counts.jobs == 1 else 's') ~ ' · ' ~ counts.documents ~ ' document' ~ ('' if counts.documents == 1 else 's'), 'your-data', 'on this computer') }}
+    {{ glance('idle', 'Appearance', themes[theme][0], 'appearance') }}
   </ul>
 </div>
 {% endblock %}
 {% block dock_label %}The setting you picked{% endblock %}
 {% block dock %}
   <section id="llm" class="settings-section" data-section="llm">
-    <h2>LLM provider</h2>
-    <p class="small muted" style="margin-bottom: 16px;">Reads your CV and the job, and writes the tailored text. With Ollama everything stays on this computer.</p>
+    <h2>Model</h2>
+    <p class="section-lead">Reads your CV and the job, and writes the tailored text. With Ollama everything stays on this computer.</p>
     <form method="post" id="settings-form" autocomplete="off" class="panel">
       <div class="grid-2">
         <div class="field">
@@ -53,8 +60,18 @@
         </div>
         <div class="field">
           <label for="LLM_MODEL">Model {% if sources.LLM_MODEL == 'env' %}<span class="faint">· from .env</span>{% endif %}</label>
-          <input type="text" id="LLM_MODEL" name="LLM_MODEL" value="{{ settings.LLM_MODEL or '' }}" placeholder="e.g. gpt-4o, openai/gpt-4o-mini, llama3">
+          <div class="model-pick" id="model-pick">
+            <input type="text" id="LLM_MODEL" name="LLM_MODEL" value="{{ settings.LLM_MODEL or '' }}" placeholder="Pick from the list, or type a model id"
+                   role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="model-list" autocomplete="off"
+                   data-saved="{{ settings.LLM_MODEL or '' }}" data-saved-provider="{{ settings.LLM_PROVIDER or '' }}">
+            <button type="button" class="model-open" id="model-open" aria-label="Show the models" aria-controls="model-list" tabindex="-1">▾</button>
+          </div>
         </div>
+      </div>
+      <div class="model-list" id="model-list" role="listbox" aria-label="Models" hidden></div>
+      <div class="model-account-row">
+        <p class="small faint model-account" id="model-account" aria-live="polite"></p>
+        <button type="button" class="link-btn small" id="model-refresh" title="Ask the provider for its current list and prices">↻ Refresh list</button>
       </div>
       <div class="field" data-for="openai azure groq openrouter">
         <label for="LLM_API_KEY">API key</label>
@@ -117,11 +134,13 @@
     </form>
   </section>
 
-  <section id="automation" class="settings-section" data-section="automation">
-    <h2>Pace and automation</h2>
+  <section id="pace" class="settings-section" data-section="pace">
+    <h2>AI pace</h2>
+    <p class="section-lead">Keeps requests inside what your provider allows, so a key is never throttled or suspended. Leave a box empty for the suggestion.</p>
     <form method="post" action="{{ url_for('settings_automation') }}" class="panel">
-      <h3>LLM pace</h3>
-      <p class="small muted" style="margin-bottom: 12px;">Keeps requests inside what your provider allows, so a key is never throttled or suspended for abuse. Leave a box empty to use the suggestion. {{ limits.suggested.why }}</p>
+      <input type="hidden" name="section" value="pace">
+      {% if limits.local %}<p class="sec-note small">A model on this computer has no cap or pace: only “At the same time” applies.</p>{% endif %}
+      <p class="small muted" style="margin-bottom: 12px;">{{ limits.suggested.why }}</p>
       <div class="grid-3">
         <div class="field">
           <label for="LLM_RPM">Requests a minute</label>
@@ -136,16 +155,40 @@
           <input type="text" id="LLM_DAILY_CAP" name="LLM_DAILY_CAP" value="{{ automation.LLM_DAILY_CAP }}" placeholder="suggested: {{ limits.suggested.daily or 'no cap' }}" inputmode="numeric">
         </div>
       </div>
-      <p class="small faint">In force: {{ limits.rpm or 'no' }} a minute · {{ limits.concurrency }} at a time · {{ limits.daily ~ ' a day' if limits.daily else 'no daily cap' }} · {{ used_today }} used today. When a provider says it's busy, the app waits as long as it asks, three times at most, instead of hammering it. Identical read-only requests (re-reading the same job or CV) reuse the earlier answer: 0 tokens.</p>
+      <p class="small faint">In force: {{ limits.rpm or 'no' }} a minute · {{ limits.concurrency }} at a time · {{ limits.daily ~ ' a day' if limits.daily else 'no daily cap' }} · {{ used_today }} used today.</p>
+      <details class="about mt-xs"><summary class="small">How pacing works</summary>
+        <p class="hint">When a provider says it's busy, the app waits as long as it asks, three times at most, instead of hammering it. Identical read-only requests (re-reading the same job or CV) reuse the earlier answer: 0 tokens.</p>
+      </details>
 
-      <h3 class="mt-lg">Automation</h3>
+      <div class="row mt-md"><button type="submit" class="secondary">Save</button></div>
+    </form>
+    <form method="post" action="{{ url_for('clear_cache') }}" class="mt-sm">
+      <button type="submit" class="link-btn small">Forget reused answers</button>
+      <span class="small faint">(the next identical request goes to the LLM again)</span>
+    </form>
+  </section>
+
+  <section id="automation" class="settings-section" data-section="automation">
+    <h2>Automation</h2>
+    <p class="section-lead">What the app does by itself. Everything else waits for you to ask.</p>
+    <form method="post" action="{{ url_for('settings_automation') }}" class="panel">
+      <input type="hidden" name="section" value="automation">
       <label class="check mt-sm"><input type="checkbox" name="SCAN_APPLICATIONS" value="1" {{ 'checked' if automation.SCAN_APPLICATIONS == '1' }}>
         Check what each application needs as soon as a job is analysed (read-only, no LLM tokens{{ '' if engine else '; needs the browser engine' }})</label>
       <label class="check mt-sm"><input type="checkbox" name="APPLY_ALONGSIDE" value="1" {{ 'checked' if automation.APPLY_ALONGSIDE == '1' }}>
         Tick “fill in the application while the CV is being written” by default (you can untick it for any job)</label>
 
-      <h3 class="mt-lg">Company research</h3>
-      <p class="small muted">A separate agent that gathers what's publicly available about each employer, with the source of every point. Shared by every job at the same company and kept for two weeks.</p>
+      <div class="row mt-md"><button type="submit" class="secondary">Save</button></div>
+    </form>
+  </section>
+
+  <section id="research" class="settings-section" data-section="research">
+    <h2>Company research</h2>
+    <p class="section-lead">Gathers what's publicly available about each employer, with the source of every point. Shared by every job at the same company and kept for two weeks.</p>
+    <form method="post" action="{{ url_for('settings_automation') }}">
+      <input type="hidden" name="section" value="research">
+      <div class="panel">
+        <h3 class="panel-title">How much</h3>
       <div class="seg-choice mt-sm" role="radiogroup" aria-label="How much research">
         {% for value, label, about in [('off', 'Off', 'No company research.'),
                                        ('simple', 'Simple', 'A Wikipedia summary, and links to the review sites you pick. No LLM tokens.'),
@@ -154,6 +197,12 @@
             <strong>{{ label }}</strong><span class="small muted">{{ about }}</span></label>
         {% endfor %}
       </div>
+      <label class="check mt-md"><input type="checkbox" name="RESEARCH_AUTO" value="1" {{ 'checked' if automation.RESEARCH_AUTO == '1' }}>
+        Research the company as soon as a job is analysed (otherwise only when you ask on the job's page)</label>
+
+      </div>
+      <div class="panel mt-md">
+        <h3 class="panel-title">Sources</h3>
       <input type="hidden" name="sources_shown" value="1">
       <div class="grid-2 mt-md">
         <fieldset class="plain-fieldset">
@@ -171,6 +220,9 @@
           {% endfor %}
         </fieldset>
       </div>
+      </div>
+      <div class="panel mt-md">
+        <h3 class="panel-title">Tavily search <span class="faint small">· optional</span></h3>
       <div class="field mt-md">
         <label for="TAVILY_API_KEY">Your Tavily API key <span class="faint">· optional: news and what people say about working there</span></label>
         <div class="row">
@@ -180,13 +232,21 @@
         </div>
         {% if tavily_source == 'settings' %}<label class="check small mt-sm"><input type="checkbox" name="clear_tavily_key" value="1"> Remove the saved key when I save</label>
         {% elif tavily_source == 'env' %}<p class="hint">This key comes from <code>.env</code>; remove it there.</p>{% endif %}
-        <p class="hint">Bring your own key from <a href="https://tavily.com" target="_blank" rel="noopener noreferrer">tavily.com ↗</a>, a search API built for AI tools (its free plan includes a monthly allowance of credits). Thorough research then makes two searches per company, 2 credits, sending only the company's name. The key stays in your settings file: never in the log, the export or a request to anyone but Tavily. Testing it uses no credits.</p>
+        <details class="about mt-xs"><summary class="small">How the key is used</summary>
+          <p class="hint">Bring your own key from <a href="https://tavily.com" target="_blank" rel="noopener noreferrer">tavily.com ↗</a>, a search API built for AI tools (its free plan includes a monthly allowance of credits). Thorough research then makes two searches per company, 2 credits, sending only the company's name. The key stays in your settings file: never in the log, the export or a request to anyone but Tavily. Testing it uses no credits.</p>
+        </details>
         <p class="small mt-xs" id="tavily-result" role="status" aria-live="polite"></p>
       </div>
-      <label class="check mt-md"><input type="checkbox" name="RESEARCH_AUTO" value="1" {{ 'checked' if automation.RESEARCH_AUTO == '1' }}>
-        Research the company as soon as a job is analysed (otherwise only when you ask on the job's page)</label>
+      </div>
+      <div class="row mt-md"><button type="submit" class="secondary">Save</button></div>
+    </form>
+  </section>
 
-      <h3 class="mt-lg">Politeness toward websites</h3>
+  <section id="politeness" class="settings-section" data-section="politeness">
+    <h2>Politeness toward websites</h2>
+    <p class="section-lead">How fast the app visits job sites, applications and research sources.</p>
+    <form method="post" action="{{ url_for('settings_automation') }}" class="panel">
+      <input type="hidden" name="section" value="politeness">
       <div class="row mt-sm">
         <select id="POLITENESS" name="POLITENESS" aria-label="Politeness toward websites" style="max-width: 200px;">
           {% for key, lv in levels.items() %}<option value="{{ key }}" {{ 'selected' if automation.POLITENESS == key }}>{{ lv.label }}</option>{% endfor %}
@@ -206,13 +266,7 @@
         </span></span>
         <span class="small faint">How fast the app visits job sites, applications and research sources.</span>
       </div>
-      <div class="row mt-md">
-        <button type="submit" class="secondary">Save</button>
-      </div>
-    </form>
-    <form method="post" action="{{ url_for('clear_cache') }}" class="mt-sm">
-      <button type="submit" class="link-btn small">Forget reused answers</button>
-      <span class="small faint">(the next identical request goes to the LLM again)</span>
+      <div class="row mt-md"><button type="submit" class="secondary">Save</button></div>
     </form>
   </section>
 
@@ -308,6 +362,142 @@
       document.querySelectorAll('[data-for]').forEach(function (f) { f.hidden = f.dataset.for.split(' ').indexOf(provider.value) === -1; });
     };
     provider.addEventListener('change', sync); sync();
+
+    // The model picker: models you've used with this provider first, then what the provider offers (free, then paid,
+    // with prices per million tokens), with your use of each today. Asked again whenever the provider changes.
+    (function () {
+      var input = document.getElementById('LLM_MODEL'), list = document.getElementById('model-list');
+      var open = document.getElementById('model-open'), account = document.getElementById('model-account');
+      var keyBox = document.getElementById('LLM_API_KEY'), hostBox = document.getElementById('OLLAMA_HOST');
+      var data = {remembered: [], models: [], today: {}}, asked = '', lastProvider = provider.value, typing = false;
+      var money = function (v) { return v == null ? '' : '$' + (v < 1 ? v.toFixed(3).replace(/0+$/, '').replace(/\.$/, '') : v.toFixed(2)); };
+      function el(tag, cls, text) { var n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+      // One row per model: its name and price on top, its id and details below.
+      function option(id, m) {
+        var b = el('button', 'model-opt'); b.type = 'button'; b.setAttribute('role', 'option'); b.dataset.id = id;
+        b.appendChild(el('span', 'mo-name', m && m.name && m.name !== id ? m.name : id));
+        b.appendChild(price(m));
+        b.appendChild(el('span', 'mo-id', id));
+        b.appendChild(el('span', 'mo-meta', details(id, m)));
+        if (id === input.value) b.setAttribute('aria-selected', 'true');
+        return b;
+      }
+      function price(m) {
+        if (!m) return el('span', 'mo-price', '');
+        if (m.free) return el('span', 'mo-price free', 'Free');
+        if (m.price_in == null) return el('span', 'mo-price', m.free_note ? 'Varies' : 'Paid');
+        return el('span', 'mo-price', money(m.price_in) + ' / ' + money(m.price_out));
+      }
+      function details(id, m) {
+        var bits = [];
+        if (m && m.context) bits.push(Math.round(m.context / 1000) + 'k context');
+        if (m && m.free_note && m.free_note !== 'price varies by the model it picks') bits.push(m.free_note);
+        if (m && m.size_gb) bits.push(m.size_gb + ' GB');
+        if (data.today[id]) bits.push(data.today[id] + ' used today');
+        if (!m && data.listed) bits.push('not in the provider\'s list now');
+        return bits.join(' · ');
+      }
+      function header(title, count, priced) {
+        var h = el('div', 'model-group');
+        h.appendChild(el('span', '', title + (count != null ? ' · ' + count : '')));
+        if (priced) h.appendChild(el('span', 'mo-col', 'per 1M tokens, in / out'));
+        return h;
+      }
+      function render() {
+        var q = typing ? input.value.trim().toLowerCase() : '', byId = {};  // the whole list until you type
+        data.models.forEach(function (m) { byId[m.id] = m; });
+        list.textContent = '';
+        var match = function (id, name) { return !q || id.toLowerCase().indexOf(q) !== -1 || (name || '').toLowerCase().indexOf(q) !== -1 || id === input.value; };
+        var used = data.remembered.filter(function (id) { return match(id); });
+        if (used.length) {
+          list.appendChild(header('Used before', null, false));
+          used.forEach(function (id) { list.appendChild(option(id, byId[id])); });
+        }
+        [['Free models', true], ['Paid models', false]].forEach(function (g) {
+          var rows = data.models.filter(function (m) { return !!m.free === g[1] && data.remembered.indexOf(m.id) === -1 && match(m.id, m.name); });
+          if (!rows.length) return;
+          list.appendChild(header(g[0], rows.length, !g[1]));
+          rows.slice(0, 60).forEach(function (m) { list.appendChild(option(m.id, m)); });
+          if (rows.length > 60) list.appendChild(el('div', 'model-more', (rows.length - 60) + ' more: type a name to narrow the list'));
+        });
+        if (!list.childNodes.length) list.appendChild(el('div', 'model-more faint', data.error ? 'No list: ' + data.error + '.' : 'No models match. Type the model id yourself.'));
+      }
+      function show(on) { list.hidden = !on; input.setAttribute('aria-expanded', String(on)); if (on) render(); }
+      function say(d) {
+        var a = d.account || {}, bits = [];
+        if (d.error) bits.push('Couldn\'t list ' + provider.options[provider.selectedIndex].text + '\'s models: ' + d.error + '.');
+        else if (d.listed) {
+          var free = d.models.filter(function (m) { return m.free; }).length;
+          bits.push(d.models.length + ' models from ' + provider.options[provider.selectedIndex].text + (free ? ', ' + free + ' free' : '') + '.');
+        } else bits.push('This provider doesn\'t publish a model list here: the models you\'ve used are offered.');
+        if (a.credit_left != null) bits.push('Credit left: ' + money(+a.credit_left) + '.');
+        if (a.free_tier) bits.push('Your key is on the free tier.');
+        if (a.note) bits.push(a.note.charAt(0).toUpperCase() + a.note.slice(1) + '.');
+        if (a.error) bits.push(a.error + '.');
+        var current = input.value.trim();
+        if (d.listed && !d.error && current && !d.models.some(function (m) { return m.id === current; }))
+          bits.unshift('“' + current + '” isn\'t in ' + provider.options[provider.selectedIndex].text + '\'s list any more: pick another, or requests may fail.');
+        if (d.fetched_at) bits.push('List from ' + new Date(d.fetched_at * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) + '.');
+        var total = Object.keys(d.today || {}).reduce(function (n, k) { return n + d.today[k]; }, 0);
+        if (total) bits.push('Today: ' + total + ' request' + (total > 1 ? 's' : '') + ' with this provider.');
+        account.textContent = bits.join(' ');
+      }
+      function load(fresh) {
+        var which = provider.value + '|' + (keyBox && keyBox.value ? keyBox.value.slice(-6) : '') + '|' + (hostBox ? hostBox.value : '');
+        if (which === asked && !fresh) return;
+        asked = which;
+        account.textContent = 'Asking ' + provider.options[provider.selectedIndex].text + ' for its models…';
+        refresh.disabled = true;
+        fetch('{{ url_for("settings_models") }}', {method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({provider: provider.value, key: keyBox ? keyBox.value : '', host: hostBox ? hostBox.value : '', refresh: !!fresh})})
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.provider !== provider.value) return;  // the provider changed again meanwhile
+            data = d; say(d);
+            if (!list.hidden) render();
+          })
+          .catch(function () { account.textContent = 'The model list couldn\'t be fetched.'; })
+          .finally(function () { refresh.disabled = false; });
+      }
+      var refresh = document.getElementById('model-refresh');
+      refresh.addEventListener('click', function () { load(true); });
+      provider.addEventListener('change', function () {
+        // The model you last used with this provider (or the saved one, back on the saved provider).
+        if (provider.value !== lastProvider) {
+          input.value = provider.value === input.dataset.savedProvider ? input.dataset.saved : '';
+          lastProvider = provider.value;
+        }
+        data = {remembered: [], models: [], today: {}};
+        load();
+        var once = function () {
+          if (!input.value && data.remembered.length) input.value = data.remembered[0];
+        };
+        setTimeout(once, 900);
+      });
+      if (keyBox) keyBox.addEventListener('change', load);
+      if (hostBox) hostBox.addEventListener('change', load);
+      input.addEventListener('focus', function () { typing = false; load(); show(true); });
+      input.addEventListener('input', function () { typing = true; show(true); });
+      open.addEventListener('click', function () { typing = false; load(); show(list.hidden); if (!list.hidden) input.focus(); });
+      list.addEventListener('click', function (e) {
+        var b = e.target.closest('.model-opt');
+        if (!b) return;
+        input.value = b.dataset.id; show(false); say(data);
+      });
+      input.addEventListener('keydown', function (e) {
+        var opts = Array.prototype.slice.call(list.querySelectorAll('.model-opt'));
+        if (e.key === 'ArrowDown') { e.preventDefault(); show(true); if (opts[0]) opts[0].focus(); }
+        if (e.key === 'Escape') show(false);
+      });
+      list.addEventListener('keydown', function (e) {
+        var opts = Array.prototype.slice.call(list.querySelectorAll('.model-opt')), i = opts.indexOf(document.activeElement);
+        if (e.key === 'ArrowDown' && i < opts.length - 1) { e.preventDefault(); opts[i + 1].focus(); }
+        if (e.key === 'ArrowUp') { e.preventDefault(); (i > 0 ? opts[i - 1] : input).focus(); }
+        if (e.key === 'Escape') { show(false); input.focus(); }
+      });
+      document.addEventListener('click', function (e) { if (!e.target.closest('#model-pick, #model-list')) show(false); });
+      load();
+    })();
 
     document.getElementById('tavily-test').addEventListener('click', function () {
       var btn = this, out = document.getElementById('tavily-result'), body = new FormData();

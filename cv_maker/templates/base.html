@@ -41,8 +41,9 @@
         <a href="{{ url_for('settings') }}#pace" class="ai-chip st-{{ u.state }}" id="ai-usage" data-state="{{ u.state }}"
            title="{% if u.cap %}{{ u.used }} of your {{ u.cap }} AI requests used today ({{ u.left }} left). {% else %}{{ u.used }} AI requests today, no daily cap set. {% endif %}Tokens today: {{ u.tokens_in }} in, {{ u.tokens_out }} out. Change the cap in Settings.">
           <span class="ai-dot" aria-hidden="true"></span>
-          <span class="ai-text">{% if u.cap %}AI left today <strong data-ai="left">{{ u.left }}</strong><span class="faint">/{{ u.cap }}</span>{% else %}AI today <strong data-ai="used">{{ u.used }}</strong> req{% endif %}</span>
+          <span class="ai-text">{% if u.local %}Local AI <strong data-ai="used">{{ u.used }}</strong> today <span class="faint">· no limit</span>{% elif u.cap %}AI left today <strong data-ai="left">{{ u.left }}</strong><span class="faint">/{{ u.cap }}</span>{% else %}AI today <strong data-ai="used">{{ u.used }}</strong> req{% endif %}</span>
           <span class="ai-extra faint" data-ai="extra"></span>
+          {% if ai_model %}<span class="ai-model" data-ai="model" title="The model the app is using now (Settings → LLM)">{{ ai_model.split(' · ')[-1] }}</span>{% endif %}
         </a>
         <form method="post" action="{{ url_for('set_theme') }}" class="theme-form">
           <input type="hidden" name="next" value="{{ request.full_path }}">

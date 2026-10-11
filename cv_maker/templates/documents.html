@@ -50,7 +50,7 @@
     {% if label %}
       <h2 class="group-head">
         {% if link == 'job' %}<a href="{{ url_for('run_detail', run_id=rows[0].run_id) }}" class="plain">{{ label }}</a>
-        {% elif link == 'company' %}<a href="{{ url_with(company=label, group=None) }}" class="plain">{{ label }}</a>
+        {% elif link == 'company' %}<a href="{{ url_with(company=label, group=None) }}" class="plain">{{ label|co }}</a>
         {% else %}{{ label }}{% endif %}<span class="count">{{ rows|length }}</span>
       </h2>
     {% endif %}
@@ -72,7 +72,7 @@
                   {% if r.meta and r.meta.get('name') %}{{ r.meta.get('name') }} · {{ (r.meta.get('roles') or [])|length }} roles{% else %}<span class="faint">—</span>{% endif %}
                 {% else %}
                   <a href="{{ url_for('run_detail', run_id=r.run_id) }}" class="plain">{{ r.title|truncate(60, True) }}</a>
-                  {% if r.company %}<div><a href="{{ url_with(company=r.company) }}" class="quiet">{{ r.company }}</a></div>{% endif %}
+                  {% if r.company %}<div><a href="{{ url_with(company=r.company) }}" class="quiet">{{ r.company|co }}</a></div>{% endif %}
                 {% endif %}
               </td>{% endif %}
               <td class="small nowrap">

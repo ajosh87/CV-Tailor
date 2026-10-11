@@ -58,7 +58,7 @@ def test_the_job_page_the_list_and_the_api_show_progress(tmp_path):
     page = client.get(f"/runs/{run.id}").data.decode()
     assert 'class="stepper"' in page and page.count("st-done") == 2 and "st-you" in page and "step 3 of 5, Your answers" in page
     jobs = client.get("/jobs").data.decode()
-    assert 'id="overall"' in jobs and "40%</strong> of the way" in jobs and "2 need you" in jobs and jobs.count('class="mini-bar you"') == 2
+    assert 'id="overall"' in jobs and "40%</strong>" in jobs and "done across" in jobs and "2 need you" in jobs and jobs.count('class="mini-bar you"') == 2
     api = client.get(f"/api/runs?ids={run.id}").get_json()
     assert api["runs"][run.id]["progress"]["percent"] == 40 and api["overall"]["jobs"] == 2
 

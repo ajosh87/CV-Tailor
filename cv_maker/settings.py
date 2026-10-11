@@ -38,6 +38,9 @@ _SERVICE_KEYS = ("TAVILY_API_KEY",)
 _ALL_KEYS = set(_DEFAULTS) | set(_AUTOMATION_DEFAULTS) | set(_SERVICE_KEYS)
 
 
+LOCAL_PROVIDERS = {"ollama"}  # models that run on this computer
+
+
 def suggested_limits(provider: str, model: str) -> dict:
     """Limits that keep well inside what the provider allows, so requests are never refused as abuse."""
     provider, model = (provider or "").lower(), (model or "").lower()
@@ -47,7 +50,8 @@ def suggested_limits(provider: str, model: str) -> dict:
     if provider == "groq":
         return {"rpm": 25, "concurrency": 1, "daily": 0, "why": "Groq's free tier allows about 30 requests a minute."}
     if provider == "ollama":
-        return {"rpm": 0, "concurrency": 1, "daily": 0, "why": "Runs on this computer: one request at a time keeps it responsive."}
+        return {"rpm": 0, "concurrency": 1, "daily": 0,
+                "why": "Runs on this computer: no cap or pace; one request at a time keeps the computer responsive."}
     return {"rpm": 50, "concurrency": 2, "daily": 0, "why": "Comfortably inside paid-tier limits."}
 
 
@@ -68,8 +72,13 @@ def llm_limits(data_dir: Path) -> dict:
         except ValueError:
             return suggested[name]
 
+    if (values.get("LLM_PROVIDER") or "").casefold() in LOCAL_PROVIDERS:
+        # On this computer: nobody to stay polite to and nothing to pay, so no per-minute pace or daily cap, whatever
+        # was set for a hosted provider. Only how many run at once still applies (it keeps the computer responsive).
+        return {"rpm": 0, "concurrency": max(1, pick("LLM_CONCURRENCY", "concurrency")), "daily": 0, "local": True,
+                "suggested": suggested}
     return {"rpm": pick("LLM_RPM", "rpm"), "concurrency": max(1, pick("LLM_CONCURRENCY", "concurrency")),
-            "daily": pick("LLM_DAILY_CAP", "daily"), "suggested": suggested}
+            "daily": pick("LLM_DAILY_CAP", "daily"), "local": False, "suggested": suggested}
 
 
 def save_automation(data_dir: Path, values: dict[str, Any]) -> dict[str, Any]:

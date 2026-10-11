@@ -94,7 +94,27 @@ def remember_answer(store, question: str, answer: str) -> None:
     store.set_preference("apply_details", data)
 
 
+# Saved answers to questions like these are personal details too: hidden from the LLM like your contact details
+# (it sees a placeholder, writes the placeholder, and the app fills the real value back in on this computer).
+_PERSONAL_ANSWERS = [
+    (re.compile(r"address|street|house|flat|apartment|locality|landmark|\bpin\s*-?\s*code\b|pincode|postal|post\s*code|"
+                r"zip|city|town|district|village|state of residence", re.I), "ADDRESS"),
+    (re.compile(r"phone|mobile|telephone|whats\s*app|contact number", re.I), "PHONE"),
+    (re.compile(r"e-?mail", re.I), "EMAIL"),
+    (re.compile(r"date of birth|\bdob\b|birth ?date|father|mother|spouse|guardian|next of kin", re.I), "DETAIL"),
+]
+
+
 def secrets(details: dict) -> list[Secret]:
-    """The identifying details, hidden from the LLM like the rest of your contact details."""
-    return [Secret(kind, details["standard"].get(key, "")) for key, kind in PRIVATE_KINDS.items()
-            if details["standard"].get(key, "").strip()]
+    """The identifying details, hidden from the LLM like the rest of your contact details: your standard details,
+    and saved answers that hold an address, a postal code, a phone number, an email or family details."""
+    found = [Secret(kind, details["standard"].get(key, "")) for key, kind in PRIVATE_KINDS.items()
+             if details["standard"].get(key, "").strip()]
+    for item in details.get("custom") or []:
+        answer = str(item.get("answer") or "").strip()
+        if len(answer) < 3 or answer.casefold() in ("yes", "no", "n/a", "na", "none"):
+            continue
+        kind = next((k for rx, k in _PERSONAL_ANSWERS if rx.search(str(item.get("question") or ""))), None)
+        if kind:
+            found.append(Secret(kind, answer))
+    return found

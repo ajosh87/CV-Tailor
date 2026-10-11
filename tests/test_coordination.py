@@ -730,7 +730,7 @@ def test_the_app_checks_applications_after_analysis_and_writes_prep_after_the_cv
     assert "Needs you to sign in on myworkdayjobs.com (email, Google)" in page and "You'll be asked: Notice period" in page
     assert "none written yet" in page and "Glassdoor reviews ↗" in page
     assert "Interview prep" in page and "Tell me about an API you built." in page and "duckduckgo.com" in page
-    assert "Company research: Acme" in page and "Acme makes anvils." in page and "<dt>Founded</dt>" in page
+    assert 'Company research: <span class="co">Acme</span>' in page and "Acme makes anvils." in page and "<dt>Founded</dt>" in page
     client.post(f"/runs/{run.id}/research", data={"depth": "thorough"})
     assert researched[-1] == ("Acme", "thorough")
 

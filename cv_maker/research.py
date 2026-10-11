@@ -29,7 +29,7 @@ from cv_maker.events import feed
 from cv_maker.jobs.html import page_links, page_text
 from cv_maker.jobs.polite import sites
 from cv_maker.jobs.urls import site_of
-from cv_maker.llm.chat import complete_json
+from cv_maker.llm.chat import complete_json, model_name
 
 # Identify honestly, with a URL, as Wikimedia's robot policy (and good manners) require: the project's public page,
 # so site owners can see what the app is and how to reach its maintainers.
@@ -491,7 +491,9 @@ def research(company: str, *, depth: str, sources: list[str], store, get_model=N
             material = (found["basics"] or found["facts"] or (found["website"] or {}).get("text") or found["discussions"]
                         or found["web"])
             if material and get_model is not None:
-                found["summary"] = _step("LLM", lambda: _organise(company, found, get_model(), context), found)
+                model = get_model()
+                found["summary"] = _step("LLM", lambda: _organise(company, found, model, context), found)
+                found["model"] = model_name(model)
                 gone = _set_aside(found, (found["summary"] or {}).get("unrelated") or [])
                 if gone:
                     feed.emit("step", f"research: set aside {gone} finding{'s' if gone != 1 else ''} about something else named {company}")

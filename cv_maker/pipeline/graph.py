@@ -587,6 +587,7 @@ class Pipeline:
             reqs = out["requirements"]
             run.requirements, run.gaps, run.questions, run.answers = reqs, out["gaps"], out["questions"], []
             run.assessment = out.get("assessment") or {}
+            run.analysed_with = self._describe_model()
             run.title = run.title or reqs.get("job_title", "")
             run.company = run.company or reqs.get("company", "")
             run.status, run.error, run.failed_stage, run.step = "needs_answers", "", "", ""

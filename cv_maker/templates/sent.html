@@ -20,7 +20,8 @@
         <strong>{{ call.purpose }}</strong>
         <span class="small faint">{{ call.created_at|when }} · {{ '{:,}'.format(call.text|length) }} characters
           {%- if call.tokens_in is defined %} · {{ '~' if call.estimated }}{{ '{:,}'.format(call.tokens_in) }} tokens in, {{ '~' if call.estimated }}{{ '{:,}'.format(call.tokens_out) }} out · {{ call.seconds }}s{% endif %}
-          {%- if call.failed %} · <span class="error-text">failed</span>{% endif %}</span>
+          {%- if call.failed %} · <span class="error-text">failed</span>{% endif %}
+          {%- if call.model %} · {{ call.model }}{% endif %}</span>
       </div>
       <p class="small muted mt-xs">{% if call.hidden %}Hidden: {{ call.hidden|hidden_summary }}.{% else %}Nothing personal found to hide.{% endif %}</p>
       <details class="sent-inline inline-only">

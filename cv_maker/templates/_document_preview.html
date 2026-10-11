@@ -14,7 +14,7 @@
   {% else %}
     <div class="dock-head">
       <h2 class="dock-title">{{ 'Cover letter' if doc.kind == 'letter' else 'CV' }} <span class="mono">v{{ doc.version }}</span></h2>
-      <span class="small faint">{{ run.title or 'Job' }}{% if run.company %} · {{ run.company }}{% endif %}</span>
+      <span class="small faint">{{ run.title or 'Job' }}{% if run.company %} · {{ run.company|co }}{% endif %}</span>
       {% if doc.kind == 'cv' and v.ats %}<span class="ats-chip ats-{{ v.ats.grade|lower }} push-right">ATS {{ v.ats.score }} · {{ v.ats.grade }}</span>{% endif %}
     </div>
     <div class="row mb-md">
