@@ -21,7 +21,6 @@
     {{ glance('ok', 'Pace', (limits.rpm ~ ' a minute' if limits.rpm else 'no per-minute limit') ~ ' · ' ~ limits.concurrency ~ ' at a time', 'automation', used_today ~ ' requests today') }}
     {% set auto = [] %}
     {% if automation.SCAN_APPLICATIONS == '1' %}{% set _ = auto.append('checks applications') %}{% endif %}
-    {% if automation.PREP_AUTO == '1' %}{% set _ = auto.append('writes prep notes') %}{% endif %}
     {% if automation.RESEARCH_AUTO == '1' %}{% set _ = auto.append('researches companies') %}{% endif %}
     {% if automation.APPLY_ALONGSIDE == '1' %}{% set _ = auto.append('applies alongside') %}{% endif %}
     {{ glance('ok' if auto else 'idle', 'Automation', ('By itself it ' ~ auto|join(', ')) if auto else 'Everything waits for you to ask', 'automation') }}
@@ -144,8 +143,6 @@
         Check what each application needs as soon as a job is analysed (read-only, no LLM tokens{{ '' if engine else '; needs the browser engine' }})</label>
       <label class="check mt-sm"><input type="checkbox" name="APPLY_ALONGSIDE" value="1" {{ 'checked' if automation.APPLY_ALONGSIDE == '1' }}>
         Tick “fill in the application while the CV is being written” by default (you can untick it for any job)</label>
-      <label class="check mt-sm"><input type="checkbox" name="PREP_AUTO" value="1" {{ 'checked' if automation.PREP_AUTO == '1' }}>
-        Write interview prep notes once the CV is written (one LLM request per job)</label>
 
       <h3 class="mt-lg">Company research</h3>
       <p class="small muted">A separate agent that gathers what's publicly available about each employer, with the source of every point. Shared by every job at the same company and kept for two weeks.</p>

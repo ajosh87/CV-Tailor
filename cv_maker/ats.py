@@ -31,11 +31,14 @@ def clean_title(title: str, company: str = "") -> str:
 
 def plan(requirements: dict, gaps: list[dict]) -> list[dict]:
     """The posting's keywords in its own words: must-haves first, with whether you have them and why."""
+    from cv_maker.jobs.requirements import JobRequirements  # cleaned terms: no years, no "X experience"
+
     by_term = {g["term"].casefold(): g for g in gaps or []}
+    reqs = JobRequirements.from_dict(requirements or {})
     out = []
-    for key, required in (("must_have", True), ("nice_to_have", False)):
-        for item in (requirements or {}).get(key) or []:
-            term = item.get("term", "")
+    for items, required in ((reqs.must_have, True), (reqs.nice_to_have, False)):
+        for item in items:
+            term = item.term
             gap = by_term.get(term.casefold(), {})
             have = bool(gap.get("level") in sk.LEVELS or (gap.get("same") and int(gap.get("score") or 0) >= sk.PARTIAL))
             support = [f["text"] for f in gap.get("found") or [] if f.get("where") not in ("Your answer",)][:2]
@@ -67,13 +70,25 @@ def _expanded(term: str) -> str:
     return f"{full} ({term})" if full and term.isupper() else term
 
 
+# Qualities and ways of working: worth showing in the summary and bullets, never listed as skills.
+_SOFT = re.compile(r"\b(ownership|communicat\w*|collaborat\w*|team(s|work|work)?|customers?|clients?|stakeholders?|fast|"
+                   r"self[- ]starter|proactive|problem[- ]solving|attention to detail|curious|curiosity|passion\w*|"
+                   r"leadership|mentor\w*|initiative|autonomy|independen\w*|adaptab\w*|cross[- ]functional|"
+                   r"work ethic|mindset|ambigu\w*|startup|fast[- ]paced)\b", re.I)
+
+
+def listable(term: str) -> bool:
+    """Whether a posting keyword belongs in a Skills list: a tool, language, method or field, not a quality."""
+    return not _SOFT.search(term) and (sk.is_known(term) or len(term.split()) <= 3)
+
+
 def optimise(doc, keyword_plan: list[dict], job_title: str = "", company: str = ""):
     """Put every keyword you have into the skills list in the posting's wording (first, in the posting's order),
     with acronyms written out once, and title the CV for the job. Never adds a keyword you don't have."""
     skills = list(doc.skills)
     ranked: list[str] = []
     for k in keyword_plan:
-        if not k["have"]:
+        if not k["have"] or not listable(k["term"]):
             continue
         term = k["term"]
         if any(sk.variants(term) & sk.variants(s) or sk.norm(s) == sk.norm(_expanded(term)) for s in ranked):

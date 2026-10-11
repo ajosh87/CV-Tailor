@@ -12,7 +12,7 @@ from markupsafe import Markup, escape
 from werkzeug.utils import secure_filename
 
 from cv_maker import logs as log_file
-from cv_maker import ats, improve, prep, progress, research, validate
+from cv_maker import ats, improve, prep, progress, research, tenure, validate
 from cv_maker import skills as sk
 from cv_maker.apply import accounts as apply_accounts
 from cv_maker.apply import details as app_details
@@ -40,8 +40,10 @@ from cv_maker.profile.extract_text import SUPPORTED_SUFFIXES, UnreadableCvError,
 from cv_maker.security import install_local_only_guard
 from cv_maker.settings import (SETTING_KEYS, automation_settings, effective_settings, get_secret_key, llm_limits,
                                save_automation, save_settings, save_tavily_key, tavily_key)
+from cv_maker.profile.merge import duplicate_groups, merge_duplicates
 from cv_maker.store import Store, profile_signature
 from cv_maker.tasks import Runner, Tasks
+from cv_maker.usage import Usage
 
 logger = logging.getLogger("cv_maker")
 
@@ -159,11 +161,13 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
     daily = SimpleNamespace(get=lambda: store.get_preference("llm_daily"), set=lambda v: store.set_preference("llm_daily", v))
     governor = Governor(lambda: llm_limits(data_dir), counter=daily)
     cache = SimpleNamespace(get=store.llm_cache_get, put=store.llm_cache_put)
+    usage = Usage(store, lambda: llm_limits(data_dir), lambda: effective_settings(data_dir)[0] if model_factory is None else {})
+    app.usage = usage
 
     def get_model():
         # Resolved per call, so Settings changes apply without a restart.
         inner = model_factory() if model_factory is not None else get_chat_model(effective_settings(data_dir)[0])
-        return PrivateModel(GovernedModel(inner, governor), hidden_everywhere, store.log_llm_call, cache=cache,
+        return PrivateModel(GovernedModel(inner, governor), hidden_everywhere, usage.record, cache=cache,
                             scope=describe_model())
 
     def fetch(url: str):
@@ -269,6 +273,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             "section": _SECTION.get(request.endpoint or "", ""),
             "llm_configured": g.llm_configured,
             "theme": g.theme, "themes": THEMES, "next_theme": _NEXT_THEME[g.theme],
+            "ai_today": usage.today(ask_provider=False),  # the provider's own figure arrives with the first refresh
         }
 
     @app.template_global()
@@ -319,6 +324,11 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
     def favicon():
         return redirect(url_for("static", filename="logo.svg"))
 
+    @app.route("/api/usage")
+    def api_usage():
+        """Today's AI use and what's left, for the header (this computer only; OpenRouter is asked about its own key)."""
+        return jsonify(usage.today())
+
     @app.route("/api/events")
     def api_events():
         """The nerdbar's live feed: what ran, for how long, and how many tokens it used (in memory only)."""
@@ -352,7 +362,8 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
 
     def render_profile(status: int = 200):
         saved = store.get_profile()
-        return render_template("profile.html", upload=current_upload(), profile=saved,
+        twins = [[saved.experiences[i] for i in group] for group in duplicate_groups(saved)] if saved else []
+        return render_template("profile.html", upload=current_upload(), profile=saved, twins=twins,
                                uploads=store.list_uploads(), extra_lists=EXTRA_LISTS, stale=stale_runs()), status
 
     @app.route("/", methods=["POST"], endpoint="upload_root")
@@ -381,7 +392,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
                   "image, export a text-based PDF or a .docx.", "error")
             return render_profile(400)
         if len(text) > 30_000:
-            flash(f"Your CV is long ({len(text):,} characters); the first 30,000 are read into your profile.")
+            flash(f"Your CV is long ({len(text):,} characters); the first 30,000 are read into your profile.", "warn")
         record = store.create_upload(file.filename, str(path), text, replace_profile=request.form.get("mode") == "replace",
                                      status="review")
         session["upload_id"] = record.id
@@ -458,7 +469,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             waiting = len(stale_runs())
             flash("Profile saved." + (f" {waiting} job{'s were' if waiting != 1 else ' was'} written from your earlier profile: "
                                       "write new versions from the Profile page or each job." if waiting else
-                                      " New CVs will use these facts; existing versions are unchanged."))
+                                      " New CVs will use these facts; existing versions are unchanged."), "success")
             return redirect(url_for("profile"))
         return render_template("profile_edit.html", profile=saved, links_text=links_text(saved.links) if saved else "",
                                extra_lists=EXTRA_LISTS, source=latest_source())
@@ -488,7 +499,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
         remove_files([upload_rec.path])
         if session.get("upload_id") == upload_id:
             session.pop("upload_id")
-        flash(f"Deleted {upload_rec.filename}. Facts already in your profile stay until you edit them.")
+        flash(f"Deleted {upload_rec.filename}. Facts already in your profile stay until you edit them.", "success")
         return redirect(url_for("profile"))
 
     @app.route("/api/upload/<upload_id>")
@@ -538,7 +549,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
                 runs.append(run)
             session["run_ids"] = [r.id for r in runs]
             logger.info("Jobs added runs=%d", len(runs))
-            flash(f"Added {len(runs)} job{'s' if len(runs) != 1 else ''}. Progress updates below.")
+            flash(f"Added {len(runs)} job{'s' if len(runs) != 1 else ''}. Progress updates below.", "success")
             for extra in (links_note, jd_note):
                 if extra:
                     flash(extra)
@@ -571,11 +582,11 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             for run_id in ids:
                 paths += store.delete_run(run_id)
             remove_files(paths)
-            flash(f"Deleted {len(ids)} job{'s' if len(ids) != 1 else ''} and their files.")
+            flash(f"Deleted {len(ids)} job{'s' if len(ids) != 1 else ''} and their files.", "success")
         else:
             archive = action != "unarchive"
             changed = store.set_archived(ids, archive)
-            flash(f"{'Archived' if archive else 'Restored'} {changed} job{'s' if changed != 1 else ''}.")
+            flash(f"{'Archived' if archive else 'Restored'} {changed} job{'s' if changed != 1 else ''}.", "success")
         return redirect(safe_next(url_for("jobs")))
 
     @app.route("/jobs/paste", methods=["GET", "POST"])
@@ -731,6 +742,8 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             saved_sites={a["site"] for a in apply_accounts.list_accounts(store) if a.get("in_keychain")},
             linkedin_offsite=scout.linkedin_offsite(run),
             stale_version=written_before_change(run),
+            years=[tenure.compare(y, store.get_profile()) for y in JobRequirements.from_dict(run.requirements).years]
+            if run.requirements and store.get_profile() else [],
             next_version=store.next_version(run.id),
         )
 
@@ -779,6 +792,20 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             note("status", f"Writing v{upcoming} from your profile as it is now, with your earlier answers. Earlier versions are kept.")
         return redirect(safe_next(url_for("run_detail", run_id=run.id)))
 
+    @app.route("/profile/merge-roles", methods=["POST"])
+    def profile_merge_roles():
+        """One entry per job, when two CVs (or a CV and a LinkedIn export) listed it twice in different words."""
+        with store.locked():
+            saved = store.get_profile()
+            if saved is None:
+                return redirect(url_for("profile"))
+            merged, removed = merge_duplicates(saved)
+            if removed:
+                store.save_profile(merged)
+        flash(f"Merged {removed} duplicate role{'s' if removed != 1 else ''}: each job is listed once, with all its "
+              "bullets." if removed else "No duplicate roles found.", "success" if removed else "message")
+        return redirect(url_for("profile"))
+
     @app.route("/profile/rewrite", methods=["POST"])
     def profile_rewrite():
         """New versions, from your updated profile, of every job last written from an older one."""
@@ -822,7 +849,15 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             flash("That job is not waiting for answers.")
             return redirect(url_for("run_detail", run_id=run.id))
         regenerating = run.status != "needs_answers"
+        missing: list[int] = []
         if request.method == "POST":
+            # Every question needs an answer you picked (Skip is one): nothing is decided without you reading it.
+            missing = [i for i in range(len(run.questions)) if not request.form.get(f"answer_{i}")]
+        if request.method == "POST" and missing:
+            names = ", ".join(run.questions[i]["term"] for i in missing[:6]) + (" and more" if len(missing) > 6 else "")
+            flash(f"{len(missing)} question{'s are' if len(missing) != 1 else ' is'} still unanswered ({names}). "
+                  "Pick an answer for each; Skip counts.", "warn")
+        elif request.method == "POST":
             answers, cut = [], []
             for i, q in enumerate(run.questions):
                 choice = request.form.get(f"answer_{i}", "skip")
@@ -840,15 +875,15 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             upcoming = tasks.queue_generate(run)
             logger.info("Answers submitted run=%s answers=%d letter=%s", run.id, len(answers), run.generate_letter)
             if cut:
-                flash(f"Kept the first {validate.ANSWER_MAX} characters of your answer about {', '.join(cut)}.")
+                flash(f"Kept the first {validate.ANSWER_MAX} characters of your answer about {', '.join(cut)}.", "warn")
             if regenerating:
-                flash(f"Writing version {upcoming}. Earlier versions are kept.")
+                flash(f"Writing version {upcoming}. Earlier versions are kept.", "success")
                 return redirect(url_for("run_detail", run_id=run.id))
             nxt = next((r for r in batch_runs() if r.status == "needs_answers" and r.id != run.id), None)
             if nxt is not None:
-                flash(f"Writing the CV for {run.title or 'that job'}. Next job below.")
+                flash(f"Writing the CV for {run.title or 'that job'}. Next job below.", "success")
                 return redirect(url_for("run_questions", run_id=nxt.id))
-            flash(f"Writing the CV for {run.title or 'that job'}.")
+            flash(f"Writing the CV for {run.title or 'that job'}.", "success")
             return redirect(url_for("jobs"))
         ids = session.get("run_ids", [])
         position = (ids.index(run.id) + 1, len(ids)) if run.id in ids and len(ids) > 1 and not regenerating else None
@@ -856,14 +891,19 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             a.term: {"choice": "skip" if a.skipped else (a.level or ("intermediate" if a.is_yes else "none")), "detail": a.detail}
             for a in answers_from_dicts(run.answers)
         }
+        if missing:  # what you'd picked stays picked
+            previous = {q["term"]: {"choice": request.form.get(f"answer_{i}", ""), "detail": request.form.get(f"detail_{i}", "")}
+                        for i, q in enumerate(run.questions)}
+        answered_count = sum(1 for q in run.questions if (previous.get(q["term"]) or {}).get("choice"))
         start, no_start = scout.start_url(run, assistant=True)
         alongside = {"possible": bool(start) and engine_ready(), "site": scout.site_of(start) if start else "",
                      "why_not": no_start if not start else "" if engine_ready() else "the browser engine isn't installed",
                      "default": run.apply_alongside if regenerating else automation_settings(data_dir)["APPLY_ALONGSIDE"] == "1",
                      "busy": any(s.is_alive() for s in [sessions.get(a.id) for a in store.list_applications()] if s)}
-        return render_template("questions.html", run=run, position=position, previous=previous,
+        return render_template("questions.html", run=run, position=position, previous=previous, missing=set(missing),
+                               answered_count=answered_count,
                                regenerating=regenerating, next_version=store.next_version(run.id), alongside=alongside,
-                               evidence={g["term"].casefold(): g for g in job_gaps(run)})
+                               evidence={g["term"].casefold(): g for g in job_gaps(run)}), 400 if missing else 200
 
     # ---- improving a version from its ATS check ----
 
@@ -974,7 +1014,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             if sessions.get(application.id) is not None:
                 sessions.get(application.id).send({"action": "stop"})
         remove_files(store.delete_run(run.id))
-        flash(f"Deleted {run.title or 'the job'} and all its versions.")
+        flash(f"Deleted {run.title or 'the job'} and all its versions.", "success")
         return redirect(url_for("jobs"))
 
     # ---- documents ----
@@ -1059,7 +1099,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             abort(404)
         remove_files([doc.path])
         _repoint_latest(doc.run_id)
-        flash(f"Deleted {'CV' if doc.kind == 'cv' else 'cover letter'} v{doc.version}.")
+        flash(f"Deleted {'CV' if doc.kind == 'cv' else 'cover letter'} v{doc.version}.", "success")
         return redirect(safe_next(url_for("run_detail", run_id=doc.run_id)))
 
     @app.route("/runs/<run_id>/versions/<int:version>/delete", methods=["POST"])
@@ -1072,7 +1112,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             store.delete_document(d.id)
         remove_files([d.path for d in docs])
         _repoint_latest(run.id)
-        flash(f"Deleted v{version}.")
+        flash(f"Deleted v{version}.", "success")
         return redirect(url_for("run_detail", run_id=run.id))
 
     def _download(run: JobRun, path: str, kind: str):
@@ -1326,7 +1366,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
                 flash(problem + " Nothing was saved.", "error")
             return redirect(url_for("settings") + "#automation")
         values.update({key: "1" if request.form.get(key) else "0"
-                       for key in ("SCAN_APPLICATIONS", "APPLY_ALONGSIDE", "PREP_AUTO", "RESEARCH_AUTO")})
+                       for key in ("SCAN_APPLICATIONS", "APPLY_ALONGSIDE", "RESEARCH_AUTO")})
         if request.form.get("RESEARCH_DEPTH") in research.DEPTHS:
             values["RESEARCH_DEPTH"] = request.form["RESEARCH_DEPTH"]
         if request.form.get("POLITENESS") in polite.LEVELS:
@@ -1364,7 +1404,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
 
     @app.route("/settings/cache/clear", methods=["POST"])
     def clear_cache():
-        flash(f"Forgot {store.clear_llm_cache()} earlier answer(s). Repeated requests will go to the LLM again.")
+        flash(f"Forgot {store.clear_llm_cache()} earlier answer(s). Repeated requests will go to the LLM again.", "success")
         return redirect(url_for("settings") + "#automation")
 
     @app.route("/settings/apply", methods=["GET", "POST"])
@@ -1383,7 +1423,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             app_details.save(store, standard, custom)
             for problem in line_problems:
                 flash(problem, "error")
-            flash("Application details saved. They stay on this computer; the LLM only sees placeholders for your contact details.")
+            flash("Application details saved. They stay on this computer; the LLM only sees placeholders for your contact details.", "success")
             return redirect(safe_next(url_for("apply_details_page")))
         return render_template("apply_details.html", details=app_details.load(store), standard=app_details.STANDARD,
                                private=app_details.PRIVATE_KINDS, accounts=apply_accounts.list_accounts(store),
@@ -1438,13 +1478,13 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
     @app.route("/settings/apply/auto-sign-in", methods=["POST"])
     def auto_sign_in():
         app_details.set_auto_sign_in(store, bool(request.form.get("auto_sign_in")))
-        flash("Saved.")
+        flash("Saved.", "success")
         return redirect(url_for("apply_details_page", next=safe_next("") or None) + "#accounts")
 
     @app.route("/settings/apply/forget", methods=["POST"])
     def forget_account():
         apply_accounts.forget_account(store, request.form.get("site", ""), request.form.get("email", ""))
-        flash("Forgotten. The saved password was removed from your system's password store, if there was one.")
+        flash("Forgotten. The saved password was removed from your system's password store, if there was one.", "success")
         return redirect(url_for("apply_details_page"))
 
     # ---- settings & your data ----
@@ -1461,7 +1501,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
             if not problems:
                 saved = save_settings(data_dir, typed, clear_api_key=bool(request.form.get("clear_api_key")))
                 logger.info("Settings updated provider=%s model=%s", saved.get("LLM_PROVIDER"), saved.get("LLM_MODEL"))
-                flash("Settings saved. They apply to the next step that uses the LLM.")
+                flash("Settings saved. They apply to the next step that uses the LLM.", "success")
                 return redirect(url_for("settings"))
             for problem in problems:
                 flash(problem + " Nothing was saved.", "error")
@@ -1523,7 +1563,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
     @app.route("/settings/log/clear", methods=["POST"])
     def log_clear():
         log_file.clear(data_dir)
-        flash("The log was cleared.")
+        flash("The log was cleared.", "success")
         return redirect(url_for("log_page"))
 
     @app.route("/settings/sent")
@@ -1533,7 +1573,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
     @app.route("/settings/sent/clear", methods=["POST"])
     def clear_sent_log():
         store.clear_llm_log()
-        flash("Cleared the record of what was sent.")
+        flash("Cleared the record of what was sent.", "success")
         return redirect(url_for("sent_log"))
 
     @app.route("/settings/test", methods=["POST"])

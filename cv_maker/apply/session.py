@@ -18,7 +18,8 @@ from cv_maker.apply import details as app_details
 from cv_maker.apply import page as pg
 from cv_maker.apply import planner
 from cv_maker.events import feed
-from cv_maker.honesty import allowed_facts_text, filter_text
+from cv_maker import tenure
+from cv_maker.honesty import allowed_facts_text, allowed_numbers_text, filter_text
 from cv_maker.jobs import polite
 from cv_maker.llm.chat import LLMError, ProviderUnsetError, complete_json
 from cv_maker.pipeline.graph import _prompt_profile, _to_plain, friendly_error
@@ -435,7 +436,10 @@ class ApplySession(threading.Thread):
                                       self.job_label)
         data = complete_json(model, prompt)
         allowed = allowed_facts_text(profile, self.job_context) if profile else ""
-        plan = planner.parse_plan(data, info, fields, check_text=lambda text: filter_text(text, [], None, "application", allowed))
+        numbers = allowed_numbers_text(profile) if profile else ""
+        roles = tenure.role_lines(profile) if profile else []
+        plan = planner.parse_plan(data, info, fields, check_text=lambda text: filter_text(text, [], None, "application", allowed,
+                                                                                        numbers, roles))
         if plan.note:
             feed.emit("apply", f"llm: {self._shown(plan.note)}")
         return plan

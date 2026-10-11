@@ -39,6 +39,11 @@ is written yet: you only choose and order. Work through these steps in order and
 4. skills_first: the candidate's skills (exactly as listed) that matter for this job, most relevant first.
    skills_drop: listed skills that are irrelevant to this job and would only dilute it.
 5. angle: one sentence on how to position this candidate for this job, from their strongest true evidence.
+6. check your plan before answering, and fix it: is every must-have the candidate has shown by at least one chosen
+   bullet? Did you leave out a bullet that is the only proof of a skill the job names? Is any skill in skills_drop
+   named in the job description, or a tool, language or method this kind of work uses? Drop only skills clearly
+   unrelated to this kind of work (lab techniques for a software role, say); when in doubt, keep. Write what you
+   changed in "review".
 
 The job
 Title: {title}
@@ -61,7 +66,8 @@ Return one JSON object:
   "roles": [{{"id": "R1", "tier": "core|supporting|peripheral", "why": "a few words"}}],
   "bullets": [{{"id": "R1.B2", "relevance": 3, "need": "which need it proves"}}],
   "skills_first": ["..."], "skills_drop": ["..."],
-  "angle": "..."}}"""
+  "angle": "...",
+  "review": "one line: what the check in step 6 changed, or 'nothing'"}}"""
 
 
 def plan(model, profile: Profile, requirements: dict, gaps: list[dict], jd_text: str, title: str = "") -> dict:

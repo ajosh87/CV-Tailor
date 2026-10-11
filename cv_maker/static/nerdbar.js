@@ -7,6 +7,7 @@
   var log = panel.querySelector('.nb-log'), state = panel.querySelector('.nb-state'), tasksBox = panel.querySelector('[data-stat=tasks]');
   var followBtn = panel.querySelector('[data-act=follow]'), count = toggle.querySelector('.nb-count'), now = toggle.querySelector('.nb-now');
   var lastSeq = 0, follow = true, open = false, timer = null, serverOffset = 0, active = [], recent = [], rows = {};
+  var primed = false, lastCalls = -1;  // the first read is history: only what happens after it pops up
 
   function remember(key, value) { try { localStorage.setItem('nerdbar.' + key, value); } catch (e) { /* private window */ } }
   function recall(key) { try { return localStorage.getItem('nerdbar.' + key); } catch (e) { return null; } }
@@ -35,12 +36,19 @@
     var stuck = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
     if (data.events.length) {
       var frag = document.createDocumentFragment();
-      data.events.forEach(function (e) { frag.appendChild(line(e)); lastSeq = Math.max(lastSeq, e.seq); });
+      data.events.forEach(function (e) {
+        frag.appendChild(line(e));
+        lastSeq = Math.max(lastSeq, e.seq);
+        if (primed) window.dispatchEvent(new CustomEvent('cv:event', {detail: e}));  // pop-ups (notify.js)
+      });
       log.appendChild(frag);
       while (log.childNodes.length > 1500) log.removeChild(log.firstChild);
       if (follow && stuck) log.scrollTop = log.scrollHeight;
     }
     var s = data.stats, totals = s.session;
+    if (primed && totals.llm_calls !== lastCalls) window.dispatchEvent(new CustomEvent('cv:llm'));  // the usage chip
+    lastCalls = totals.llm_calls;
+    primed = true;
     serverOffset = s.now - Date.now() / 1000;
     active = s.active;
     recent = s.recent;

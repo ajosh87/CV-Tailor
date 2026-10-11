@@ -263,6 +263,8 @@ def test_every_request_is_masked_recorded_and_signed_locally(tmp_path):
     run = app.store.get_run(run.id)
     assert run.status == "ready" and run.company == "Acme"
 
+    assert len(RecordingModel.prompts) == 5  # interview prep isn't written by itself
+    client.post(f"/runs/{run.id}/prep")
     reading_job, planning_cv, writing_cv, writing_letter, prep_notes = RecordingModel.prompts[1:]
     assert "jane@acme.example" not in reading_job and "555 0100" not in reading_job and "Acme" not in reading_job
     assert planning_cv.startswith("You are planning how to tailor a CV")

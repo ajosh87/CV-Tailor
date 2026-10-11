@@ -120,6 +120,14 @@ clicking it (or <kbd>`</kbd>) splits the right half again, page's right half abo
 either divider (or focus it and use the arrow keys; double-click resets); the sizes are remembered on this
 computer and set before the page shows, so nothing jumps. On narrow screens the halves stack.
 
+**AI left today:** the header shows how many of today's AI requests are left under your daily cap (Settings →
+Pace and automation), or how many were used without one, and the tokens they took; it turns amber at 20% left
+and red when none are. With OpenRouter it also shows your key's remaining credit, as OpenRouter reports it.
+
+**Pop-ups:** messages appear in the corner, marked as what they are (done, note, check this, problem), along with
+background work that finishes or needs you (a CV written, research done, the application assistant waiting).
+Problems stay until you close them; the rest fade, but not while you're reading one.
+
 **nerdbar:** a live, terminal-style view of what the app is doing: every step, every LLM request (what was
 hidden, tokens in and out, time taken), task timers and session totals. It shows placeholders, never
 your details.
@@ -164,6 +172,23 @@ that matches, contact details they can read and dates on every role. So:
   support each, and the ones you don't (never claimed). Then the app makes sure every keyword you have appears
   in the posting's own wording (acronyms written out once, like "Retrieval-Augmented Generation (RAG)"),
   puts Skills right under the summary and titles the CV with the posting's job title.
+- **Years are counted, never copied.** A posting's "3+ years of experience in software engineering" is a
+  requirement, not a keyword: it's shown on the job's page next to each of your roles' durations (counted from
+  your dates, never rounded up), and never written onto the CV. The CV names a role and its own duration
+  ("2 yrs 5 mos as Research Analyst") and never states a total. The fact check removes any number of years that
+  doesn't name a role lasting that long, and any number that comes from the posting instead of your profile.
+- **Planned with a second look.** The plan checks itself before it's used: every must-have you have is shown by a
+  chosen bullet, and no skill the job names or this kind of work uses is dropped. When the fact check rejects a
+  sentence or bullet (a tool spelled differently, a duration rounded up, a detail your profile doesn't show), one
+  more request looks at each piece again (the point it made, what was objected to, which facts support it) and
+  rewrites it from those facts, or gives it up. Every rewrite is checked again, and the fact-check tab marks it
+  "revised". The cover letter is planned the same way (the job's three main needs, each matched to a role) and gets
+  the same second look. Qualities such as "ownership" stay in the summary and bullets, never in the skills list.
+- **Each thing once.** A job listed twice in your profile in different words (two CVs, or a CV and a LinkedIn
+  export) is shown once, and the Profile page offers to merge such duplicates. A bullet that repeats another is
+  dropped, and a rewrite that stuffs in more than one new keyword keeps your wording.
+- **Every question answered.** Nothing is pre-selected: each question needs an answer you picked (Skip counts),
+  with a count of how many are done and a jump to the next one.
 - **Changed your profile?** Each version remembers the profile it was written from. When yours has changed
   since, the job's page offers *Write v2 with your changes*, and the Profile page lists every such job with
   one button to rewrite them all, using the answers you already gave.
@@ -222,9 +247,14 @@ saved in one step, so a crash can't leave the file half written.
 
 ## Interview prep and company research
 
-Once a CV is written, the job's page gets **interview prep** notes (one LLM request): the role in brief,
-topics to brush up on (each marked strong, refresh or gap against your profile), likely questions and which part
-of your experience answers them, questions to ask, and things to watch out for in the posting.
+**Interview prep** is written only when you ask for it on the job's page (one LLM request). It says what to actually
+say, not "talk about your experience": a "tell me about yourself" pitch for this job, and for each likely question
+what the interviewer is testing, an answer in your own voice built from your roles (situation, task, action and
+result for behavioural questions; the approach, the trade-offs and the result for technical ones), the facts to get
+across, what to avoid, and the likely follow-up with what to say to it. Questions about a gap get an honest answer:
+what you haven't done, the closest thing you have, and how you'd get up to speed. Topics to brush up on come with the
+subtopics to revise. Every answer is fact-checked against your profile like the CV, and the page says how many
+sentences the check took out.
 
 **Company research** is a separate agent. Its findings are shared by every job at the same company, kept
 for two weeks, and every point names its source. Choose the depth in Settings → *Pace and automation*,
@@ -257,8 +287,8 @@ or per job with *Simple* / *Thorough*:
   marked as possibly mixed up and redone the next time it's needed.
 - When a source refuses or asks the app to slow down, research skips it and says so on the job's page.
 
-Interview prep, company research and the application check each have a switch in Settings, so you can
-have them run only when you ask.
+Company research and the application check each have a switch in Settings, so you can have them run only when
+you ask; interview prep always waits for you.
 
 ## Pace: staying within limits
 

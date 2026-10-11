@@ -53,8 +53,12 @@
     var replaced = [];
     document.querySelectorAll('[data-part][id]').forEach(function (now) {
       var next = doc.getElementById(now.id);
-      if (!next || plain(now) === plain(next)) return;
-      if (now.dataset.part === 'flash' && !next.children.length) return;  // messages stay until there are new ones
+      if (!next) return;
+      if (now.dataset.part === 'flash') {  // new messages join the pop-ups (notify.js); the ones showing stay
+        Array.prototype.forEach.call(next.children, function (m) { now.appendChild(document.importNode(m, true)); });
+        return;
+      }
+      if (plain(now) === plain(next)) return;
       var active = document.activeElement, focusKey = '', start = null, end = null;
       if (active && now.contains(active) && active !== now) {
         focusKey = fieldKey(active);
@@ -116,7 +120,7 @@
         done();
         // the answer to what you pressed: a message in that part of the page (or at the top), brought into view
         var said = null;
-        replaced.some(function (id) { said = document.getElementById(id).querySelector('.sec-note, .flash'); return said; });
+        replaced.some(function (id) { said = document.getElementById(id).querySelector('.sec-note'); return said; });
         if (said) said.scrollIntoView({block: 'nearest', behavior: 'smooth'});
       })
       .catch(function () {  // the page can't be updated in place: send it the ordinary way

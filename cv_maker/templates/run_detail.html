@@ -98,6 +98,15 @@
         <span class="m-weak"><strong>{{ counts.weak }}</strong> weak</span>
         <span class="m-none"><strong>{{ counts.none }}</strong> not found</span>
       </div>
+      {% for y in years %}
+        <div class="years-row">
+          <p class="small"><strong>The job asks for {{ y.text }}{% if y.of and y.of|lower not in y.text|lower %} ({{ y.of }}){% endif %}.</strong>
+            Your roles, from their dates: all together {{ y.total }}{% if not y.meets_total %}, less than asked{% endif %}.</p>
+          <ul class="dot-list small faint">{% for r in y.roles %}<li>{{ r.text }}</li>{% endfor %}</ul>
+          <p class="small faint">Only the time a role actually spent on that work counts toward it, so the CV names each role with its own
+            duration and never states a total number of years.</p>
+        </div>
+      {% endfor %}
       <p class="small muted">Each requirement in the posting, scored 0–100 from where it appears in your profile: your skills list, your roles (recent roles count more), certifications and projects, and the level you gave. Open one to see exactly what counted. Strong ones go on the CV in the posting's own words; weak ones are never claimed.</p>
       <ul class="match-list mt-sm">
         {% for g in gaps %}
@@ -211,32 +220,48 @@
       <header class="card-head"><h2>Interview prep</h2>{{ badge(states.prep) }}</header>
       {{ section_notes('prep') }}
       {% if 'prep' in busy %}
-        <p class="small muted"><span class="spinner" aria-hidden="true"></span> {{ 'Prep notes follow once the CV is written.' if run.status == 'generating' else 'Writing prep notes…' }}</p>
+        <p class="small muted"><span class="spinner" aria-hidden="true"></span> Writing prep notes…</p>
       {% elif n %}
         {% if n.role_in_brief %}<p class="mb-sm">{{ n.role_in_brief }}</p>{% endif %}
+        {% if n.pitch %}
+          <details class="acc" data-key="prep-pitch" open><summary>“Tell me about yourself”</summary>
+            <div class="acc-body"><p class="say">{{ n.pitch }}</p><p class="small faint mt-xs">About a minute, in your words. Every fact is from your profile.</p></div>
+          </details>
+        {% endif %}
         {% if n.brush_up %}
           <details class="acc" data-key="prep-brush"><summary>Brush up on <span class="count">{{ n.brush_up|length }}</span></summary>
             <div class="acc-body"><ul class="prep-list">{% for b in n.brush_up %}
               <li><span class="mini-pill m-{{ {'strong': 'strong', 'refresh': 'partial', 'gap': 'none'}.get(b.status, 'weak') }}">{{ b.status or 'topic' }}</span>
-                <strong>{{ b.topic }}</strong><div class="small muted">{{ b.why }}</div></li>{% endfor %}</ul></div>
+                <strong>{{ b.topic }}</strong><div class="small muted">{{ b.why }}</div>
+                {% if b.review %}<div class="small mt-xs"><span class="faint">Revise:</span> {{ b.review }}</div>{% endif %}</li>{% endfor %}</ul></div>
           </details>
         {% endif %}
         {% if n.likely_questions %}
           <details class="acc" data-key="prep-questions"><summary>Likely questions <span class="count">{{ n.likely_questions|length }}</span></summary>
-            <div class="acc-body"><ul class="prep-list">{% for q in n.likely_questions %}
-              <li>{{ q.question }} <span class="small faint">· {{ q.kind }}</span>{% if q.draw_on %}<div class="small muted">Draw on: {{ q.draw_on }}</div>{% endif %}</li>{% endfor %}</ul></div>
+            <div class="acc-body">{% for q in n.likely_questions %}
+              <details class="prep-q" data-key="prep-q-{{ loop.index }}"{{ ' open' if loop.first }}>
+                <summary><strong>{{ q.question }}</strong> <span class="small faint">· {{ q.kind }}</span></summary>
+                {% if q.why_they_ask %}<p class="small muted">They're testing: {{ q.why_they_ask }}</p>{% endif %}
+                {% if q.answer %}<p class="small faint mt-xs">What to say</p><p class="say">{{ q.answer }}</p>
+                {% elif q.draw_on %}<p class="small muted">Draw on: {{ q.draw_on }}</p>{% endif %}
+                {% if q.key_points %}<p class="small faint mt-xs">Make sure you mention</p><ul class="dot-list small">{% for k in q.key_points %}<li>{{ k }}</li>{% endfor %}</ul>{% endif %}
+                {% if q.avoid %}<p class="small mt-xs"><span class="warn-text">Avoid:</span> {{ q.avoid }}</p>{% endif %}
+                {% if q.follow_up %}<p class="small mt-xs"><span class="faint">If they follow up with</span> “{{ q.follow_up }}”</p>
+                  {% if q.follow_up_answer %}<p class="say small">{{ q.follow_up_answer }}</p>{% endif %}{% endif %}
+              </details>{% endfor %}</div>
           </details>
         {% endif %}
         {% if n.ask_them %}<details class="acc" data-key="prep-ask"><summary>Questions to ask them <span class="count">{{ n.ask_them|length }}</span></summary><div class="acc-body"><ul class="dot-list small">{% for a in n.ask_them %}<li>{{ a }}</li>{% endfor %}</ul></div></details>{% endif %}
         {% if n.watch_outs %}<details class="acc" data-key="prep-watch"><summary>Watch-outs <span class="count">{{ n.watch_outs|length }}</span></summary><div class="acc-body"><ul class="dot-list small">{% for w in n.watch_outs %}<li>{{ w }}</li>{% endfor %}</ul></div></details>{% endif %}
         {% if n.company_points %}<details class="acc" data-key="prep-company"><summary>About {{ run.company }} <span class="count">{{ n.company_points|length }}</span></summary><div class="acc-body"><ul class="dot-list small">{% for c in n.company_points %}<li>{{ c }}</li>{% endfor %}</ul><p class="small faint mt-xs">From the company research below.</p></div></details>{% endif %}
         <form method="post" action="{{ url_for('write_prep', run_id=run.id) }}" class="row mt-sm" data-inline>
-          <span class="small faint">Written {{ p.written_at|when }} from the posting, your profile, the application check and the company research.</span>
+          <span class="small faint">Written {{ p.written_at|when }} from the posting, your profile, the application check and the company research.
+            {% if n.fact_check %}The fact check took out {{ n.fact_check|length }} sentence{{ 's' if n.fact_check|length != 1 }} your profile doesn't support.{% endif %}</span>
           <button type="submit" class="link-btn small" data-busy-text="Writing…">Write them again</button>
         </form>
       {% else %}
         {% if p.error %}<p class="small error-text">{{ p.error }}</p>{% endif %}
-        <p class="small muted">What to brush up on, likely questions (and which of your experiences to draw on), and questions to ask. One LLM request; written automatically once the CV is ready unless you turned that off in Settings.</p>
+        <p class="small muted">What to brush up on, a “tell me about yourself” pitch, likely questions with what to actually say (from your own roles, fact-checked), the follow-ups, and questions to ask them. One LLM request, only when you ask.</p>
         <form method="post" action="{{ url_for('write_prep', run_id=run.id) }}" class="mt-sm" data-inline><button type="submit" class="secondary sm" data-busy-text="Writing…">Write prep notes</button></form>
       {% endif %}
     </section>

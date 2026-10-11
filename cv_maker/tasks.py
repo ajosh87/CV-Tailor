@@ -245,9 +245,8 @@ class Tasks:
         self._mark(run, "generating", "Queued for writing…")
         if alongside and run.apply_alongside and self.on_generate is not None:
             self.on_generate(run, version)  # the application starts now and waits for this version's CV
-        # Prep notes follow the CV; marked under way now, so the page doesn't offer to write them meanwhile.
-        prep_after = self._allowed("PREP_AUTO") and not run.prep.get("notes") and self._claim(run.id, "prep")
-        self.runner.submit(self._generate, run.id, prep_after)
+        # Interview prep is written only when you ask for it (the job's page), never after the CV by itself.
+        self.runner.submit(self._generate, run.id)
         return version
 
     # Each returns False when that work is already under way for the job.
@@ -296,15 +295,9 @@ class Tasks:
         with feed.task(f"job {run_id[:6]}", f"Analyzing {self._label(run_id)}"):
             self._analyzed(self.pipeline.analyze(run_id))
 
-    def _generate(self, run_id: str, prep_after: bool = False) -> None:
-        try:
-            with feed.task(f"job {run_id[:6]}", f"Writing the CV for {self._label(run_id)}"):
-                run = self.pipeline.generate(run_id)
-            if prep_after and run is not None and run.status == "ready":
-                self._prep_task(run_id)
-        finally:
-            if prep_after:
-                self._release(run_id, "prep")
+    def _generate(self, run_id: str) -> None:
+        with feed.task(f"job {run_id[:6]}", f"Writing the CV for {self._label(run_id)}"):
+            self.pipeline.generate(run_id)
 
     def _scan_task(self, run_id: str) -> None:
         with feed.task(f"job {run_id[:6]}", f"Checking the application for {self._label(run_id)}"):
@@ -320,7 +313,7 @@ class Tasks:
             return
         try:
             info = self._company_research(run)
-            notes = prep.write_notes(run, _prompt_profile(_to_plain(profile)), self.get_model(), info)
+            notes = prep.write_notes(run, _prompt_profile(_to_plain(profile)), self.get_model(), info, profile)
             error = ""
         except Exception as exc:
             notes, error = {}, friendly_error(exc)

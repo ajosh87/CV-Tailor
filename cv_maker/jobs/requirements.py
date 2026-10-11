@@ -1,5 +1,8 @@
 from cv_maker.llm.chat import ChatModel, complete_json
-from cv_maker.skills import norm, split_requirement
+import re
+
+from cv_maker import tenure
+from cv_maker.skills import core, norm, split_requirement
 
 
 class MustHave:
@@ -29,6 +32,7 @@ class JobRequirements:
         company: str = "",
         notes: list[str] | None = None,
         responsibilities: list[str] | None = None,
+        years: list[dict] | None = None,
     ) -> None:
         self.must_have = must_have
         self.nice_to_have = nice_to_have
@@ -42,6 +46,8 @@ class JobRequirements:
         self.company = company
         self.notes = notes or []  # things to know before applying, read in the same request (no extra tokens)
         self.responsibilities = responsibilities or []  # what the job is mostly about: steers emphasis and questions
+        # "3+ years of experience in ...": compared with your roles' dates (tenure.py), never a keyword or a skill.
+        self.years = years or []
 
     def to_dict(self) -> dict:
         return {
@@ -57,10 +63,13 @@ class JobRequirements:
             "company": self.company,
             "notes": self.notes,
             "responsibilities": self.responsibilities,
+            "years": self.years,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "JobRequirements":
+        raw = [i for key in ("must_have", "nice_to_have") for i in data.get(key) or []]
+        texts = [x for i in raw for x in ((i.get("term"), i.get("original")) if isinstance(i, dict) else (i,)) if x]
         return cls(
             must_have=[MustHave(t, o) for t, o in _terms(data.get("must_have"), 20)],
             nice_to_have=[NiceToHave(t, o) for t, o in _terms(data.get("nice_to_have"), 12)],
@@ -74,6 +83,7 @@ class JobRequirements:
             company=_text(data.get("company")),
             notes=[_text(n)[:200] for n in (data.get("notes") or []) if _text(n)][:8],
             responsibilities=[_text(r)[:200] for r in (data.get("responsibilities") or []) if _text(r)][:6],
+            years=data.get("years") or tenure.requirements_in(map(str, texts)),
         )
 
 
@@ -81,6 +91,22 @@ def _text(value) -> str:
     if isinstance(value, list):
         return ", ".join(str(v) for v in value if v)
     return str(value or "").strip()
+
+
+_YEARS_LEAD = re.compile(r"^(?:at least |minimum (?:of )?)?" + tenure.YEARS.pattern + r"\.?\s*(?:of\s+)?"
+                         r"(?:(?:professional|relevant|hands-on|industry|commercial|work)\s+)*(?:experience\s*)?"
+                         r"(?:(?:with|in|of|using|as|building|on)\s+)?", re.I)
+_NOT_A_SKILL = re.compile(r"^(?:experience|professional experience|relevant experience|work experience|years?|"
+                          r"industry experience|related experience)?$", re.I)
+
+
+def _skill_only(part: str) -> str:
+    """The skill a requirement names, without the years or the word "experience": "3+ years of Python experience" is
+    Python; "3+ years experience" and "Agile/Scrum experience" are no skill and Agile/Scrum. Years are compared
+    with your dates separately, so they're never written onto a CV as a keyword."""
+    stripped = _YEARS_LEAD.sub("", part.strip()).strip(" .,:;-")
+    stripped = core(stripped).strip(" .,:;-")
+    return "" if _NOT_A_SKILL.match(stripped) or tenure.YEARS.search(stripped) else stripped
 
 
 def _terms(items, limit: int = 20) -> list[tuple[str, str]]:
@@ -94,6 +120,7 @@ def _terms(items, limit: int = 20) -> list[tuple[str, str]]:
         else:
             term = original = _text(item)
         for part in split_requirement(term):
+            part = _skill_only(part)
             if part and norm(part) not in seen:
                 seen.add(norm(part))
                 out.append((part, original))

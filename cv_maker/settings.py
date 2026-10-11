@@ -27,7 +27,6 @@ _AUTOMATION_DEFAULTS: dict[str, str] = {
     "LLM_DAILY_CAP": "",  # LLM requests per day; empty: suggested (only free models have one)
     "SCAN_APPLICATIONS": "1",  # check what each application needs, read-only, as soon as a job is analysed
     "APPLY_ALONGSIDE": "0",  # start filling in the application while the CV is being written
-    "PREP_AUTO": "1",  # write interview prep notes once the CV is written
     "RESEARCH_DEPTH": "simple",  # company research: off | simple | thorough (see research.py)
     "RESEARCH_SOURCES": "wikipedia,wikidata,website,hackernews,glassdoor,indeed,ambitionbox,reddit",
     "RESEARCH_AUTO": "1",  # research the company as soon as a job is analysed (otherwise only when asked)

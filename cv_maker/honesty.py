@@ -3,12 +3,18 @@
 The LLM may reword and reorder, but the output must not claim skills the profile lacks or invent
 numbers. Rather than deleting individual words (which mangles prose), offending sentences and
 bullets are dropped, and identity, employers, titles, dates and education always come from the profile.
+
+Numbers come from your profile only, never from the job posting: a posting's "3+ years" is a requirement, not a
+fact about you. A number of years must name a role whose dates show that long ("2 years as Research Analyst"),
+so a CV never claims a total your dates don't support. Each role appears once, a bullet that repeats another is
+dropped, and a rewrite that stuffs in several new keywords keeps your wording instead.
 """
 import json
 import re
 from dataclasses import asdict
 
 from cv_maker import skills as sk
+from cv_maker import tenure
 from cv_maker.jobs.match import mentions, profile_corpus
 from cv_maker.models import Education, Experience, Profile
 
@@ -76,38 +82,94 @@ def _numbers(text: str) -> set[str]:
     return set(_NUMBER.findall(text))
 
 
+_DASHES = re.compile(r"[\u2010-\u2015\u2212\u00ad]")  # the hyphens and dashes models write instead of "-"
+# Endings that make a compound out of a known word ("Python-based", "LLM-powered"): the claim is the known word.
+_COMPOUND_ENDS = {"based", "driven", "powered", "enabled", "focused", "first", "native", "centric", "oriented", "ready",
+                  "heavy", "led", "specific", "related", "like", "style", "friendly", "aware", "grade", "scale"}
+
+
+def plain_dashes(text: str) -> str:
+    return _DASHES.sub("-", text or "")
+
+
 def _vocabulary(text: str) -> set[str]:
-    return {w.lower().strip(".'-") for w in re.findall(r"[\w&+#.'-]+", text)}
+    words = {w.lower().strip(".'-") for w in re.findall(r"[\w&+#.'-]+", plain_dashes(text))}
+    return words | {part for w in words if "-" in w for part in w.split("-") if part}
+
+
+def _known(word: str, words: set[str]) -> bool:
+    """A name the allowed text contains: as written, singular or plural ("SMEs"/"SME"), or a compound of known parts."""
+    low = word.lower()
+    if low in words or low.rstrip("s") in words or f"{low}s" in words or low.removesuffix("es") in words:
+        return True
+    parts = [x for x in low.split("-") if x]
+    return len(parts) > 1 and all(x in words or x in _COMPOUND_ENDS or x.rstrip("s") in words for x in parts)
 
 
 def _unsupported(sentence: str, words: set[str], numbers: set[str]) -> str:
     """Why a free-text sentence makes a claim the allowed facts don't contain ("" if it doesn't)."""
+    sentence = plain_dashes(sentence)
     invented = sorted(_numbers(sentence) - numbers)
     if invented:
         return f"introduced numbers not in your profile ({', '.join(invented)})"
     names = []
     for token in _WORD.findall(sentence)[1:]:  # the first word is capitalized anyway
         word = re.sub(r"'s$", "", token).strip(".'-")
-        if word[:1].isupper() and word not in _COMMON_CAPITALS and word.lower() not in words and word not in names:
+        if word[:1].isupper() and word not in _COMMON_CAPITALS and not _known(word, words) and word not in names:
             names.append(word)
     if names:
         return f"names {', '.join(names)}, which isn't in your profile or the job posting"
     return ""
 
 
+def _duration_pattern(months: int) -> str:
+    """'2 yrs 5 mos', '2 years and 5 months', '2 years 5 months' for 29 months."""
+    years, rest = divmod(months, 12)
+    y = rf"{years}\s*(?:yrs?|years?)" if years else ""
+    m = rf"{rest}\s*(?:mos?|months?)" if rest else ""
+    return rf"\b{y},?\s*(?:and\s+)?{m}\b" if y and m else rf"\b{y or m}\b"
+
+
+def years_unsupported(sentence: str, roles: list[dict]) -> str:
+    """Why a sentence's number of years isn't backed by a role it names ("" if it is, or says no years)."""
+    claims = tenure.years_claims(sentence)
+    if not claims:
+        return ""
+    low = sentence.casefold()
+    named = [r for r in roles if r["months"] and ((r["title"] and r["title"].casefold() in low)
+                                                   or (r["company"] and r["company"].casefold().split(" ")[0] in low))]
+    for years in claims:
+        if not any(r["months"] >= years * 12 for r in named):
+            if named:
+                shown = "; ".join(f"{r['title']}: {tenure.describe(r['months'])}" for r in named)
+                return f"claims {years:g}+ years, but the role it names shows {shown}"
+            return (f"claims {years:g}+ years without naming a role that lasted that long (a total of years is never "
+                    "stated: your roles show their own durations)")
+    return ""
+
+
 def filter_text(text: str, banned: list[str], check: FactCheck | None = None, where: str = "summary",
-                allowed_text: str | None = None) -> str:
-    """Drop every sentence that mentions a banned term or, given `allowed_text`, any number or name not in it."""
+                allowed_text: str | None = None, numbers_text: str | None = None, roles: list[dict] | None = None) -> str:
+    """Drop every sentence that mentions a banned term or, given `allowed_text`, any name not in it, or a number
+    not in `numbers_text` (default: `allowed_text`). Given `roles` (tenure.role_lines), a number of years must
+    name a role whose dates show that long."""
     words = _vocabulary(allowed_text) if allowed_text is not None else None
-    numbers = _numbers(allowed_text) if allowed_text is not None else None
+    numbers = _numbers(numbers_text if numbers_text is not None else allowed_text) if allowed_text is not None else None
     kept = []
-    for sentence in _SENTENCE.split(text.strip()):
+    for sentence in _SENTENCE.split(plain_dashes(text).strip()):
         if not sentence:
             continue
         hits = _offending(sentence, banned)
         reason = f"mentions {', '.join(hits)}, which your profile does not confirm" if hits else ""
+        if not reason and roles is not None:
+            reason = years_unsupported(sentence, roles)
         if not reason and words is not None:
-            reason = _unsupported(sentence, words, numbers)
+            # A role's duration as listed ("2 yrs 5 mos") is a fact from your dates: its numbers aren't invented.
+            said = sentence
+            for r in roles or []:
+                if r["months"]:
+                    said = re.sub(_duration_pattern(r["months"]), " ", said, flags=re.I)
+            reason = _unsupported(said, words, numbers)
         if reason:
             if check is not None:
                 check.add(where, "removed", sentence, reason)
@@ -117,8 +179,30 @@ def filter_text(text: str, banned: list[str], check: FactCheck | None = None, wh
 
 
 def allowed_facts_text(profile: Profile, context_text: str = "") -> str:
-    """Everything a free-text sentence may draw names and numbers from: the profile plus job context."""
+    """Everything a free-text sentence may draw names from: the profile plus job context."""
     return json.dumps(asdict(profile), ensure_ascii=False) + "\n" + context_text
+
+
+def allowed_numbers_text(profile: Profile) -> str:
+    """Everything a free-text sentence may draw numbers from: the profile and how long each role lasted (in whole
+    years and months, rounded down). Never the posting: its numbers are requirements, not facts about you."""
+    durations = []
+    for r in tenure.role_lines(profile):
+        if r["months"]:
+            durations += [str(r["months"] // 12), str(r["months"])]
+    return json.dumps(asdict(profile), ensure_ascii=False) + "\n" + " ".join(durations)
+
+
+_TOKENS = re.compile(r"[a-z0-9+#]+")
+
+
+def _similar(a: str, b: str) -> float:
+    x, y = set(_TOKENS.findall(a.casefold())), set(_TOKENS.findall(b.casefold()))
+    return len(x & y) / len(x | y) if x and y else 0.0
+
+
+def _added_keywords(new: str, source: str, keywords: list[str]) -> list[str]:
+    return [k for k in keywords if sk.found_in(k, new) and not sk.found_in(k, source)]
 
 
 def _overclaim(text: str, levels: dict) -> str:
@@ -141,8 +225,11 @@ def _within_levels(text: str, levels: dict, check: FactCheck | None, where: str)
     return " ".join(kept).strip()
 
 
+MAX_NEW_KEYWORDS = 1  # a rewrite may bring in one posting keyword its original doesn't name, where the fact fits
+
+
 def _safe_bullets(original: list[str], rewritten: list[str], banned: list[str], check: FactCheck | None, role: str,
-                  levels: dict | None = None) -> list[str]:
+                  levels: dict | None = None, keywords: list[str] | None = None) -> list[str]:
     if len(rewritten) != len(original):
         # Cannot pair rewrites with source facts; keep the facts as written.
         if check is not None and rewritten != original:
@@ -156,11 +243,15 @@ def _safe_bullets(original: list[str], rewritten: list[str], banned: list[str], 
             hits = _offending(new, banned) if new else []
             invented = sorted(_numbers(new) - _numbers(source)) if new else []
             level_reason = _overclaim(new, levels) if new and not _overclaim(source, levels) else ""
+            stuffed = _added_keywords(new, source, keywords or []) if new else []
+            stuffing = (f"added {len(stuffed)} keywords its original doesn't mention ({', '.join(stuffed)})"
+                        if len(stuffed) > MAX_NEW_KEYWORDS else "")
             if not new:
                 out.append(source)
-            elif hits or invented or level_reason:
+            elif hits or invented or level_reason or stuffing:
                 reason = (f"mentions {', '.join(hits)}, which your profile does not confirm" if hits
-                          else f"introduced numbers not in your CV ({', '.join(invented)})" if invented else level_reason)
+                          else f"introduced numbers not in your CV ({', '.join(invented)})" if invented
+                          else level_reason or stuffing)
                 if check is not None:
                     check.add("experience", "kept original", new, reason)
                 out.append(source)
@@ -171,13 +262,40 @@ def _safe_bullets(original: list[str], rewritten: list[str], banned: list[str], 
     return out
 
 
+REPEAT = 0.6  # share of words two bullets have in common before the later one counts as saying the same thing
+
+
+def _drop_repeats(experiences: list[Experience], check: FactCheck | None) -> None:
+    """A bullet that says what an earlier one already said (the same rewrite twice, or two near-identical facts)
+    is dropped, so the CV makes each point once."""
+    kept: list[str] = []
+    for exp in experiences:
+        out = []
+        for bullet in exp.bullets:
+            twin = next((k for k in kept if _similar(bullet, k) >= REPEAT), None)
+            if twin is not None:
+                if check is not None:
+                    check.add("experience", "removed", bullet, f"repeats “{twin[:80]}”")
+                continue
+            kept.append(bullet)
+            out.append(bullet)
+        exp.bullets = out
+
+
+def _evidenced_parts(skill: str, profile: Profile) -> list[str]:
+    """The parts of a skill ("ETL/data pipelines") that your roles, projects or certifications describe."""
+    corpus = profile_corpus(profile)
+    parts = [x.strip() for x in re.split(r"\s*/\s*|\s*,\s*|\s+and\s+", skill) if x.strip()]
+    return [x for x in parts if len(x) > 2 and sk.found_in(x, corpus)]
+
+
 def contact_line(profile: Profile) -> list[str]:
     return [v for v in [profile.email, profile.phone, profile.location, *profile.links.values()] if v]
 
 
 def filter_cv_document(doc: CvDocument, allowed: Profile, banned_terms: list[str] | None = None,
                        check: FactCheck | None = None, context_text: str = "", selection: list[list[int]] | None = None,
-                       drop_skills: list[str] | None = None) -> CvDocument:
+                       drop_skills: list[str] | None = None, keywords: list[str] | None = None) -> CvDocument:
     """`context_text` (the job title, company and description) may supply names the summary uses. `selection`
     (tailor.py): which bullets of each role this CV uses, in order; `doc.experiences` then lines up with your roles
     one for one, each with one rewrite per chosen bullet ("" keeps your wording). `drop_skills`: skills that only
@@ -194,10 +312,17 @@ def filter_cv_document(doc: CvDocument, allowed: Profile, banned_terms: list[str
         elif key and any(sk.variants(name) & sk.variants(p.name) or sk.found_in(name, p.name) for p in allowed.skills):
             if name not in skills:
                 skills.append(name)  # your skill under the posting's name ("RAG" for "multimodal RAG")
+        elif key and (shown := _evidenced_parts(name, allowed)):
+            # Named in your roles but not your skills list ("data pipelines" in a bullet): kept, as far as it's shown.
+            kept = " / ".join(shown)
+            if kept not in skills:
+                skills.append(kept)
+            if kept != name and check is not None:
+                check.add("skills", "shortened", name, f"only “{kept}” is shown by your profile")
         elif key:
             invented.append(name)
             if check is not None:
-                check.add("skills", "removed", name, "not a skill in your profile")
+                check.add("skills", "removed", name, "not a skill in your profile, and your roles don't describe it")
     # Skills the model left out still belong on the CV, after the ones it ranked (when the CV is planned for this
     # job: not the ones that only dilute it, and not so many that the relevant ones get lost).
     dropped = {_norm(d) for d in drop_skills or []}
@@ -217,19 +342,31 @@ def filter_cv_document(doc: CvDocument, allowed: Profile, banned_terms: list[str
     # Skills you said you know at a beginner or intermediate level are never described as more.
     levels = {s.name: s.level for s in allowed.skills if s.level in ("beginner", "intermediate")}
     rewritten = {(_norm(e.company), _norm(e.title)): e for e in doc.experiences}
+    from cv_maker.profile.merge import same_role  # (merge imports models only; no cycle)
+
     experiences = []
+    shown: list[Experience] = []
     for i, exp in enumerate(allowed.experiences):
         role = f"{exp.title} — {exp.company}"
+        twin = next((e for e in shown if same_role(e, exp)), None)
+        if twin is not None:  # in your profile twice (two CVs merged): on the CV once
+            if check is not None:
+                check.add("experience", "removed", role, f"the same job as “{twin.title} — {twin.company}” in your "
+                          "profile; it's shown once (merge them on the Profile page)")
+            continue
+        shown.append(exp)
         if selection is not None:
             sources = [exp.bullets[j] for j in selection[i]] if i < len(selection) else list(exp.bullets)
             match = doc.experiences[i] if i < len(doc.experiences) else None
         else:
             sources = exp.bullets
             match = rewritten.get((_norm(exp.company), _norm(exp.title)))
-        bullets = _safe_bullets(sources, match.bullets if match else sources, banned, check, role, levels)
+        bullets = _safe_bullets(sources, match.bullets if match else sources, banned, check, role, levels, keywords)
         experiences.append(Experience(exp.company, exp.title, exp.location, exp.start, exp.end, exp.current, bullets, exp.confirmed))
+    _drop_repeats(experiences, check)
 
-    summary = filter_text(doc.summary, banned, check, "summary", allowed_facts_text(allowed, context_text))
+    summary = filter_text(doc.summary, banned, check, "summary", allowed_facts_text(allowed, context_text),
+                          allowed_numbers_text(allowed), tenure.role_lines(allowed))
     return CvDocument(
         name=allowed.name or doc.name,
         summary=_within_levels(summary, levels, check, "summary"),

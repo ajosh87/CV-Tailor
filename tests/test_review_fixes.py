@@ -70,7 +70,10 @@ def test_summary_with_invented_numbers_or_employers_is_flagged():
     doc = CvDocument("", "Engineer with 15 years at Google leading 200 people. Python developer at Northwind.", [], [], ["Python"])
     out = filter_cv_document(doc, _profile(), [], check)
     assert out.summary == "Python developer at Northwind."
-    assert "15, 200" in check.items[0]["reason"]
+    assert "claims 15+ years" in check.items[0]["reason"]  # years must come from a role's dates
+    doc = CvDocument("", "Engineer leading 200 people. Python developer at Northwind.", [], [], ["Python"])
+    filter_cv_document(doc, _profile(), [], check := FactCheck())
+    assert "200" in check.items[0]["reason"]
 
 
 def test_summary_names_must_come_from_profile_or_job():
@@ -169,15 +172,20 @@ def _ready(app, client, url="https://jobs.example.com/1", **form):
     client.post(res.headers["Location"], data={"action": "send"})  # accept the check-before-sending page
     client.post("/jobs", data={"urls": url})
     run = next(r for r in app.store.list_runs() if r.job_url == url)
-    client.post(f"/runs/{run.id}/questions", data=form)
+    client.post(f"/runs/{run.id}/questions", data={**_skip_all(app, run), **form})
     return app.store.get_run(run.id)
+
+
+def _skip_all(app, run):
+    """Every question answered, as Skip: the form refuses unanswered questions."""
+    return {f"answer_{i}": "skip" for i in range(len(app.store.get_run(run.id).questions))}
 
 
 def test_deleting_an_old_cv_does_not_pair_an_old_letter_with_the_new_cv(tmp_path):
     app = _app(tmp_path)
     client = app.test_client()
     run = _ready(app, client, generate_letter="1")        # v1: CV + letter
-    client.post(f"/runs/{run.id}/questions", data={})     # v2: CV only
+    client.post(f"/runs/{run.id}/questions", data=_skip_all(app, run))     # v2: CV only
     v1_cv = next(d for d in app.store.list_documents(run.id) if d.kind == "cv" and d.version == 1)
     client.post(f"/documents/{v1_cv.id}/delete")
     after = app.store.get_run(run.id)

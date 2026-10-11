@@ -22,11 +22,12 @@ from typing import Callable
 
 from langgraph.graph import END, StateGraph
 
-from cv_maker import ats, tailor
+from cv_maker import ats, revise, tailor, tenure
 from cv_maker.events import feed
 from cv_maker.export.docx_cv import ExportError, write_cv_docx
 from cv_maker.export.letter import write_letter_docx
-from cv_maker.honesty import CvDocument, FactCheck, allowed_facts_text, contact_line, filter_cv_document, filter_text
+from cv_maker.honesty import (CvDocument, FactCheck, allowed_facts_text, allowed_numbers_text, contact_line,
+                              filter_cv_document, filter_text, plain_dashes)
 from cv_maker.improve import bullet_ref, role_ref
 from cv_maker.jobs.assess import assess
 from cv_maker.jobs.match import Question, match_profile
@@ -99,6 +100,8 @@ _PROMPT_EXTRAS = ("certifications", "projects", "languages")
 def _prompt_profile(profile: dict) -> str:
     slim = {k: v for k, v in profile.items() if k not in _LOCAL_ONLY}
     slim["experiences"] = [{k: v for k, v in e.items() if k != "confirmed"} for e in profile.get("experiences", [])]
+    for e, exp in zip(slim["experiences"], _profile_from_dict(profile).experiences):
+        e["duration"] = tenure.describe(tenure.months(exp))  # counted from the dates: the only durations to state
     slim["skills"] = [s["name"] for s in profile.get("skills", [])]
     levels = {s["name"]: s["level"] for s in profile.get("skills", []) if s.get("level")}
     if levels:
@@ -234,6 +237,17 @@ not in the profile.
 {keyword_plan}
 {level_rules}
 {improve_lines}
+Time, counted from the candidate's dates: {tenure_lines}
+The job asks for: {years_asked}
+Never state a total number of years of experience, and never copy a number from the job description. When time
+matters, name the role and its duration as listed above ("2 yrs 5 mos as Research Analyst"); a role counts only for
+the work it actually involved.
+
+Keep each bullet's meaning. Don't add tools, methods, results or claims its original doesn't state. Use a posting
+keyword in a bullet only where the original already describes that skill, at most one new keyword per bullet, and
+never write requirement phrases such as "3+ years experience" or "X experience" into a bullet or the skills.
+Don't repeat a point already made in another bullet.
+
 What this job is mostly about (lead with these):
 {needs}
 How to position the candidate: {angle}
@@ -256,7 +270,7 @@ Return one JSON object:
 {{
   "summary": "3 sentences grounded strictly in the profile: open with the target role ({job_title}) or the candidate's closest real title, then the strongest evidence for the job's top needs, using 3-5 of the keywords above in the posting's wording. Nothing about work this job doesn't need.",
   "experiences": [{{"id": "R1", "bullets": [{{"id": "R1.B2", "text": "the rewritten bullet: a strong action verb, the result first where there is one, every number unchanged, the posting's wording for a skill when the fact is the same"}}]}}],
-  "skills": ["skills from the profile only, written as the posting writes them when it is the same skill, most relevant to this job first"]
+  "skills": ["every profile skill that this job or this kind of work uses, written as the posting writes them when it is the same skill, most relevant first; never a requirement phrase or a quality such as 'ownership'"]
 }}
 Write every bullet id listed above exactly once, and no others. Plain text only: no tables, emoji or decorative symbols."""
 
@@ -335,6 +349,9 @@ def rewrite_cv_node(state: TailorState, ctx: PipelineContext) -> dict:
                                     needs="\n".join(f"- {n}" for n in needs) or "(see the job description)",
                                     angle=plan.get("angle") or "from the strongest evidence for the job's needs",
                                     selection=tailor.numbered_selection(profile, chosen, plan),
+                                    tenure_lines="; ".join(r["text"] for r in tenure.role_lines(profile)) or "(no dates)",
+                                    years_asked="; ".join(y["text"] for y in (state.get("requirements") or {}).get("years") or [])
+                                    or "(no number of years)",
                                     job_title=ats.clean_title(state.get("job_title", ""), state.get("company", "")) or "the posting's title",
                                     jd=state.get("jd_text", "")[:15000], profile=_prompt_profile(state["profile"]))
     data = complete_json(ctx.get_model(), prompt)
@@ -348,8 +365,25 @@ def rewrite_cv_node(state: TailorState, ctx: PipelineContext) -> dict:
         skills=[s for s in data.get("skills") or [] if s],
     )
     context = f"{state.get('job_meta', '')}\n{state.get('jd_text', '')}"
-    filtered = filter_cv_document(draft, profile, banned, check, context, selection=chosen,
-                                  drop_skills=plan.get("skills_drop") if plan.get("relevance") else None)
+    drop = plan.get("skills_drop") if plan.get("relevance") else None
+    keywords = [k["term"] for k in keyword_plan]
+    filtered = filter_cv_document(draft, profile, banned, check, context, selection=chosen, drop_skills=drop, keywords=keywords)
+    # A second look at what the check rejected: rewrite it from the profile's facts so the point (and the skill it
+    # shows) isn't lost, then check the whole CV again.
+    rejected = revise.fixable(check.items, ("summary", "experience"))
+    fixes = _revisions(ctx, rejected, state, profile, "CV")
+    if fixes:
+        draft.summary = _replace_all(plain_dashes(draft.summary), fixes)
+        draft.experiences = [Experience(e.company, e.title, "", "", None, False, [fixes.get(b.strip(), b) for b in e.bullets], True)
+                             for e in draft.experiences]
+        first = check.items
+        check = FactCheck()
+        filtered = filter_cv_document(draft, profile, banned, check, context, selection=chosen, drop_skills=drop, keywords=keywords)
+        kept = _plain(filtered)
+        check.items = [i for i in first if i not in rejected] + [
+            {"where": i["where"], "action": "revised", "text": fixes[i["text"]],
+             "reason": f"rewritten after the fact check ({i['reason']})"} for i in rejected
+            if i["text"] in fixes and fixes[i["text"]] in kept] + [i for i in check.items if i not in first]
     # Every keyword you have, in the posting's wording; the CV titled for the job; then the ATS check on the result.
     optimised = ats.optimise(filtered, keyword_plan, state.get("job_title", ""), state.get("company", ""))
     result = ats.check(_to_plain(optimised), keyword_plan, state.get("job_title", ""), state.get("company", ""))
@@ -359,6 +393,35 @@ def rewrite_cv_node(state: TailorState, ctx: PipelineContext) -> dict:
                       f"{sum(k['in_cv'] for k in result['keywords'] if k['required'])} of "
                       f"{sum(1 for k in result['keywords'] if k['required'])} must-have keywords in the CV")
     return {"cv_document": _to_plain(optimised), "fact_check": check.to_dict(), "ats": result}
+
+
+def _revisions(ctx: PipelineContext, rejected: list[dict], state: TailorState, profile, where: str) -> dict:
+    """The rewrites of what the fact check rejected ({} when nothing was, or the request fails: then the check's
+    removals simply stand)."""
+    if not rejected:
+        return {}
+    try:
+        fixes = revise.revise(ctx.get_model(), rejected, _prompt_profile(state["profile"]),
+                              "; ".join(r["text"] for r in tenure.role_lines(profile)), state.get("job_meta", ""), where)
+    except (LLMError, ProviderUnsetError) as exc:
+        logger.warning("revise: run=%s the fact check's removals stand: %s", state["run_id"], exc)
+        return {}
+    if fixes:
+        feed.emit("step", f"second look: rewrote {len(fixes)} of {len(rejected)} piece{'s' if len(rejected) != 1 else ''} "
+                          f"the fact check rejected in the {where}, then checked them again")
+    return fixes
+
+
+def _replace_all(text: str, fixes: dict) -> str:
+    for old, new in fixes.items():
+        if old.rstrip()[-1:] in ".!?" and new.rstrip()[-1:] not in ".!?":
+            new = new.rstrip() + old.rstrip()[-1]  # a sentence still ends as one, or it runs into the next
+        text = text.replace(plain_dashes(old), new)
+    return text
+
+
+def _plain(doc) -> str:
+    return " ".join([doc.summary] + [b for e in doc.experiences for b in e.bullets])
 
 
 def export_docx_node(state: TailorState, ctx: PipelineContext) -> dict:
@@ -375,7 +438,12 @@ def export_docx_node(state: TailorState, ctx: PipelineContext) -> dict:
 
 
 _LETTER_PROMPT = """Write a cover letter (250-350 words, 3-4 short paragraphs) for this job.
+Plan it first, in "plan": the job's 3 most important needs, and for each the strongest matching fact in the profile
+(name the role). Then write the letter around those three matches, in the posting's wording where the fact is the
+same, and spell every tool as the profile does. Leave out anything the profile doesn't show.
 Use ONLY facts from the candidate profile; never invent experience, numbers or skills.
+Never state a total number of years of experience or copy a number from the job description: when time matters,
+name the role and its duration as given in the profile ("duration").
 {banned_line}
 Never leave template gaps like [Company]; if the company is unknown, say "your team".
 End with a closing such as "Kind regards," and nothing after it: the candidate's name is added automatically.
@@ -388,7 +456,7 @@ Job description:
 Candidate profile:
 {profile}
 
-Return one JSON object: {{"letter": "the full letter, paragraphs separated by blank lines"}}"""
+Return one JSON object: {{"plan": ["need -> matching fact (role)"], "letter": "the full letter, paragraphs separated by blank lines"}}"""
 
 
 def optional_letter_node(state: TailorState, ctx: PipelineContext) -> dict:
@@ -407,7 +475,17 @@ def optional_letter_node(state: TailorState, ctx: PipelineContext) -> dict:
         check = FactCheck()
         profile = _profile_from_dict(state["profile"])
         allowed = allowed_facts_text(profile, f"{state.get('job_meta', '')}\n{state.get('jd_text', '')}")
-        paragraphs = [filter_text(p, banned, check, "letter", allowed) for p in letter.split("\n\n")]
+        numbers, roles = allowed_numbers_text(profile), tenure.role_lines(profile)
+        paragraphs = [filter_text(p, banned, check, "letter", allowed, numbers, roles) for p in letter.split("\n\n")]
+        rejected = revise.fixable(check.items, ("letter",))
+        fixes = _revisions(ctx, rejected, state, profile, "cover letter")
+        if fixes:  # rewrite what was rejected, then check the whole letter again
+            letter = _replace_all(plain_dashes(letter), fixes)
+            first, check = check.items, FactCheck()
+            paragraphs = [filter_text(p, banned, check, "letter", allowed, numbers, roles) for p in letter.split("\n\n")]
+            check.items = [i for i in first if i not in rejected] + [
+                {"where": "letter", "action": "revised", "text": fixes[i["text"]], "reason": f"rewritten after the fact check ({i['reason']})"}
+                for i in rejected if i["text"] in fixes and fixes[i["text"]] in " ".join(paragraphs)] + check.items
         body = "\n\n".join(p for p in paragraphs if p)
         if not body:
             raise LLMError("The model returned an empty letter.")

@@ -826,3 +826,53 @@ html.no-js .has-details { display: none; }
 #ap-needs .question .q-label { font-weight: 600; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 0; }
 #ap-needs .question.secret { border-left: 3px solid var(--warn, #d9a400); }
 #ap-needs .choice-list { display: grid; gap: 4px; margin-top: 8px; max-height: 220px; overflow: auto; padding-right: 6px; }
+.years-row { border-left: 3px solid var(--accent); padding: 6px 12px; margin: 10px 0; border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.years-row p { margin: 0 0 4px; }
+
+/* ---- questions: every one answered ---- */
+.q-progress { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 8px 12px; margin: 0 0 12px; border-radius: 8px; background: var(--surface, var(--bg)); border: 1px solid var(--border); }
+.q-progress .progress-bar { flex: 1 1 120px; }
+.q-progress.complete { border-color: var(--accent); }
+fieldset.question.unanswered { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+
+/* ---- pop-ups: messages as toasts, each marked as what it is ---- */
+#flashes { position: fixed; top: 64px; right: 16px; z-index: 60; display: flex; flex-direction: column; gap: 8px;
+  width: min(400px, calc(100vw - 32px)); pointer-events: none; }
+#flashes:empty { display: none; }
+#flashes .toast { pointer-events: auto; margin: 0; padding: 10px 12px 12px; border-radius: 10px; border: 1px solid var(--border);
+  border-left: 4px solid var(--t-color, var(--muted)); background: var(--surface-2, var(--surface)); color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28); font-size: 0.9rem; animation: toast-in 0.18s ease-out; }
+#flashes .toast.leaving { opacity: 0; transform: translateX(12px); transition: opacity 0.2s, transform 0.2s; }
+#flashes .toast-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+#flashes .toast-icon { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font-size: 0.75rem;
+  font-weight: 700; color: var(--bg); background: var(--t-color, var(--muted)); }
+#flashes .toast-kind { font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--t-color, var(--muted)); }
+#flashes .toast-close { margin-left: auto; background: none; border: 0; color: var(--muted); font-size: 1.1rem; line-height: 1;
+  padding: 2px 6px; cursor: pointer; min-height: 0; }
+#flashes .toast-close:hover { color: var(--text); }
+#flashes .t-success { --t-color: var(--ok, #3fb950); }
+#flashes .t-info { --t-color: var(--accent); }
+#flashes .t-warn { --t-color: var(--warn, #d9a400); }
+#flashes .t-error { --t-color: var(--danger); }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { #flashes .toast { animation: none; } }
+
+/* ---- AI left today, in the header ---- */
+.ai-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 0.8rem;
+  border: 1px solid var(--border); color: var(--text); text-decoration: none; white-space: nowrap; }
+.ai-chip:hover { border-color: var(--accent); }
+.ai-chip .ai-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok, #3fb950); }
+.ai-chip.st-low .ai-dot { background: var(--warn, #d9a400); }
+.ai-chip.st-low { border-color: var(--warn, #d9a400); }
+.ai-chip.st-out .ai-dot { background: var(--danger); }
+.ai-chip.st-out { border-color: var(--danger); }
+@media (max-width: 720px) { .ai-chip .ai-extra, .ai-chip .faint { display: none; } }
+
+/* ---- interview prep: what to say ---- */
+.say { border-left: 3px solid var(--accent); padding: 6px 10px; margin: 4px 0; background: color-mix(in srgb, var(--accent) 6%, transparent);
+  border-radius: 0 6px 6px 0; line-height: 1.5; }
+.prep-q { border-bottom: 1px solid var(--border); padding: 8px 0; }
+.prep-q > summary { cursor: pointer; list-style: none; }
+.prep-q > summary::-webkit-details-marker { display: none; }
