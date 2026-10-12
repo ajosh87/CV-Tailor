@@ -30,7 +30,7 @@ VERIFY_EMAIL = re.compile(r"verify your e-?mail|verification (e-?mail|link|code)
                           r"confirm your e-?mail|we('ve| have) (just )?sent (you )?an? (e-?mail|code)", re.I)
 CONFIRMED = re.compile(r"thank(s| you) for (your )?appl|application (has been |was )?(successfully )?(submitted|received)|"
                        r"we('ve| have) received your application|successfully (submitted|applied)|you('ve| have) applied", re.I)
-_CV_FILE = re.compile(r"r[ée]sum[ée]|\bcv\b|curriculum", re.I)
+_CV_FILE = re.compile(r"r[ée]sum[ée]|\bcv\b|curriculum|resume", re.I)
 _LETTER_FILE = re.compile(r"cover(ing)? letter|motivation", re.I)
 _NOT_APPLICATION_UPLOAD = re.compile(r"\bmatch(es|ing)?\b|\bscore\b|compare|similar jobs|recommend|profile photo|avatar", re.I)
 
@@ -220,6 +220,7 @@ def by_rule(page: dict, details: dict, files: dict) -> tuple[list[Action], list[
             # Only into an upload that clearly asks for it: never a "see how well you match" widget.
             if _NOT_APPLICATION_UPLOAD.search(label):
                 continue
+            label = upload_label(f, page)
             if _LETTER_FILE.search(label):
                 if files.get("letter"):
                     actions.append(Action("upload", f["id"], files["letter"], label, shown="your cover letter"))
@@ -277,15 +278,33 @@ def pick_many(answer: str, options: list[str]) -> list[str]:
     return out
 
 
+def upload_label(f: dict, page: dict) -> str:
+    """What an upload is for, when its label doesn't say: its name or id ("resume_file"), or, for the only upload on
+    a page that asks for a CV or résumé, that."""
+    label = f.get("label", "")
+    if _CV_FILE.search(label) or _LETTER_FILE.search(label):
+        return label
+    named = f"{f.get('name', '')} {f.get('accept', '')}"
+    if _LETTER_FILE.search(named.replace("_", " ")):
+        return f"{label} (cover letter)"
+    if _CV_FILE.search(named.replace("_", " ")):
+        return f"{label} (résumé)"
+    uploads = [x for x in page.get("fields", []) if x.get("kind") == "file"]
+    if len(uploads) == 1 and _CV_FILE.search(page.get("text", "") + " " + " ".join(b["text"] for b in page.get("buttons", []))):
+        return f"{label} (résumé)"
+    return label
+
+
 def pending_documents(page: dict) -> dict:
     """Upload fields still empty on this page: {"cv": field or None, "letter": field or None}."""
     found = {"cv": None, "letter": None}
     for f in page["fields"]:
         if f.get("kind") != "file" or f.get("filled") or _NOT_APPLICATION_UPLOAD.search(f.get("label", "")):
             continue
-        if _LETTER_FILE.search(f.get("label", "")):
+        label = upload_label(f, page)
+        if _LETTER_FILE.search(label):
             found["letter"] = found["letter"] or f
-        elif _CV_FILE.search(f.get("label", "")):
+        elif _CV_FILE.search(label):
             found["cv"] = found["cv"] or f
     return found
 
@@ -336,10 +355,19 @@ def find_field(question: dict, fields: list[dict]) -> dict | None:
 
 
 def for_llm(page: dict, handled: set) -> list[dict]:
-    """The fields the LLM may decide: empty, not handled by rule, and nothing personal to you."""
+    """The fields the LLM may decide: required, empty, not handled by rule, and nothing personal to you. Optional
+    fields are left for you (they're listed when the assistant pauses): asking the model about them made each step
+    slower and invited guesses."""
     return [f for f in page["fields"]
-            if not f.get("filled") and f["id"] not in handled and f.get("kind") not in ("file", "password")
+            if not f.get("filled") and f.get("required") and f["id"] not in handled and f.get("kind") not in ("file", "password")
             and not is_secret(f) and not is_eeo(f) and not is_consent(f) and not is_marketing(f)]
+
+
+def optional_left(page: dict, handled: set) -> list[dict]:
+    """Optional fields still empty after the rules: never guessed, shown to you when the assistant pauses."""
+    return [f for f in page["fields"]
+            if not f.get("filled") and not f.get("required") and f["id"] not in handled and f.get("kind") not in ("file", "password")
+            and not is_marketing(f)]
 
 
 _PROMPT = """You are helping a candidate fill in a job application form in their own browser, one page at a time.
@@ -428,11 +456,22 @@ def build_prompt(page: dict, fields: list[dict], profile_text: str, details: dic
     )
 
 
+_TEMPLATE_ECHO = {"one short sentence on what you did", "...", "…", "a short question for the candidate"}
+
+
+def _not_an_answer(value: str, f: dict) -> bool:
+    v = norm_label(value)
+    return (not v or v in _TEMPLATE_ECHO or v == norm_label(f.get("label", ""))
+            or v in ("n/a", "none", "null", "not provided", "unknown") and not f.get("options"))
+
+
 def parse_plan(data: dict, page: dict, allowed: list[dict], check_text=lambda text: text) -> Plan:
     """Turn the model's answer into actions, refusing anything outside the guards."""
     fields = {f["id"]: f for f in allowed}
     buttons = {b["id"]: b for b in page.get("buttons", [])}
-    plan = Plan(note=str(data.get("note") or "")[:200])
+    note = " ".join(str(data.get("note") or "").split())
+    note = note if len(note) <= 400 else note[:399].rstrip() + "…"
+    plan = Plan(note="" if note.strip().casefold() in _TEMPLATE_ECHO else note)
     asked = set()
     for item in data.get("ask") or []:
         if not isinstance(item, dict):
@@ -447,6 +486,8 @@ def parse_plan(data: dict, page: dict, allowed: list[dict], check_text=lambda te
         raw = item.get("value")
         value = " ; ".join(str(v) for v in raw) if isinstance(raw, list) else str(raw or "").strip()
         f = fields.get(str(item.get("id")))
+        if f and _not_an_answer(value, f):
+            continue  # "Middle Name" for Middle Name, "..." from the template: weaker models echo; that's no answer
         if not f or not value or f["id"] in asked:
             continue
         kind = f.get("kind", "")
@@ -486,15 +527,25 @@ def parse_plan(data: dict, page: dict, allowed: list[dict], check_text=lambda te
             do = "ready_to_submit"  # the final submit is always yours to approve
         elif ACCOUNT.search(button["text"]):
             do = "account"
-    if do == "ready_to_submit" and target not in buttons:
+    if do == "ready_to_submit" and (target not in buttons or not SUBMIT.search(buttons[target]["text"])):
         target = next((b["id"] for b in page.get("buttons", []) if SUBMIT.search(b["text"])), "")
+        if not target:  # no Submit button on this page: it isn't the last one, whatever the model thinks
+            found = navigation(page)
+            do, target = ("click", found[1]) if found and found[0] == "click" else ("wait", "")
     plan.next = do if do in ("click", "ready_to_submit", "account", "human", "wait", "done") else "wait"
     plan.next_id = target
     return plan
 
 
 _NEXT = re.compile(r"^(next|continue|save (and|&) continue|save (and|&) next|proceed|next step|continue to .{1,30})$", re.I)
-_START = re.compile(r"^(apply( now| for this (job|role|position))?|apply manually|start( (your )?application)?|i'?m interested)$", re.I)
+_START = re.compile(r"^(apply( now| online| here| today| for (this|the) (job|role|position)| to (this|the)? ?(job|role|position))?|"
+                    r"apply manually|start( (your |an |the )?application)?|begin( (your )?application)?|i'?m interested|"
+                    r"apply for job|submit (your )?(cv|r[ée]sum[ée])|quick apply)$", re.I)
+
+
+def _button_text(text: str) -> str:
+    """'Apply now →' -> 'Apply now': arrows, icons and stray punctuation around a button's words don't count."""
+    return re.sub(r"^[^\w]+|[^\w)]+$", "", text or "").strip()
 
 
 def navigation(info: dict) -> tuple[str, str] | None:
@@ -502,12 +553,12 @@ def navigation(info: dict) -> tuple[str, str] | None:
     Returns ("click" | "ready_to_submit", element id), or None when it isn't obvious."""
     buttons = info["buttons"]
     submit = [b for b in buttons if SUBMIT.search(b["text"])]
-    nexts = [b for b in buttons if _NEXT.match(b["text"].strip())]
+    nexts = [b for b in buttons if _NEXT.match(_button_text(b["text"]))]
     if len(nexts) == 1:
         return ("click", nexts[0]["id"])
     if submit and not nexts:
         return ("ready_to_submit", submit[0]["id"])
-    starts = [b for b in buttons if _START.match(b["text"].strip())]
+    starts = [b for b in buttons if _START.match(_button_text(b["text"]))]
     manual = [b for b in starts if "manual" in b["text"].casefold()]
     same = len({b["text"].strip().casefold() for b in starts}) == 1  # "Apply now" at the top and the bottom
     pending = [f for f in info["fields"] if not f.get("filled") and not (f.get("kind") == "file" and not f.get("required"))]
@@ -563,6 +614,24 @@ def cookie_banner(page: dict) -> tuple[str, str] | None:
     if any(_ACCEPT_COOKIES.fullmatch(b["text"].strip()) for b in page.get("buttons", [])):
         return ("accept-only", "")
     return None
+
+
+# Popups that only want something from you on the side: closed with their non-committal button.
+_NUISANCE = re.compile(r"newsletter|subscribe|talent (community|network|pool)|job alerts?|stay (updated|in touch|connected|informed)|"
+                       r"sign ?up for (updates|alerts|our)|survey|feedback|how (was|did|likely)|rate (your|us)|"
+                       r"download (our|the) app|get the app|push notifications?|join our (community|network|mailing|team of)|"
+                       r"webinar|we'?d love (your|to hear)|similar jobs|recommended jobs|before you go|don'?t miss", re.I)
+# Anything that may be part of applying, signing in, consenting or proving you're human is never dismissed.
+_KEEP_OPEN = re.compile(r"\bapply\b|application|r[ée]sum[ée]|\bcv\b|required|sign ?in|log ?in|password|verify|captcha|"
+                        r"cookie|consent|terms|privacy|session|time ?out|unsaved|are you sure|leave (this )?page", re.I)
+
+
+def dismissable(page: dict) -> list[dict]:
+    """Popups the assistant may close for you: they ask for something on the side (a newsletter, a survey...),
+    hold no form fields but an email box, offer a non-committal way out, and say nothing about the application."""
+    return [d for d in page.get("dialogs") or []
+            if d.get("close_id") and not d.get("fields") and _NUISANCE.search(d.get("text", ""))
+            and not _KEEP_OPEN.search(d.get("text", ""))]
 
 
 def confirmed(page: dict) -> bool:

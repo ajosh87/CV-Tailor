@@ -354,6 +354,27 @@ app. You can pause and take over (click and type in the view) at any time, then 
   typeaheads (it types and picks a suggestion), "select all that apply" boxes, scrollable lists, radio groups
   and date fields. Every fill is read back: a value the site didn't keep is asked about, with the options the
   site offered, instead of the assistant moving on.
+- **Popups and chat widgets:** cookie banners get the privacy-preserving choice (refuse optional cookies; when a
+  site offers only *Accept*, you choose). Chat widgets (support bots and recruiting assistants such as Intercom,
+  Drift, Zendesk, Paradox or Phenom) are ignored: their boxes and buttons are never read, filled or sent to the LLM.
+  A popup that only wants something on the side (a newsletter, "join our talent community", a survey, an app
+  download) is closed with its non-committal button (×, *No thanks*, *Not now*), and the log says which. Nothing
+  that mentions the application, signing in, consent, cookies or verification is ever dismissed, and nothing is
+  ever subscribed to, joined or accepted. When something still covers a button, the assistant names it ("covered
+  by `<div class="newsletter-overlay">`") and lists it among what needs you.
+- **Every pause says why:** the panel lists the fields that need you, one by one (required and empty, the site
+  shows an error, the answer didn't stay, a password or code only you type, optional and left to you), and hovering
+  one outlines it in the live view.
+- **What you type in the view is kept:** when you take over, fill something in yourself and resume, the assistant
+  notes it as yours: it's reused for the rest of the application, listed in the review as "you, in the view", and
+  *Save them for future applications* keeps it for next time. Never a password, code or ID number.
+- **Faster steps:** the LLM is asked only about required fields the rules can't fill, with a compact profile (roles,
+  dates, skills, education; your bullets only when the form asks a written question). Optional fields are left for
+  you. On a model running on your own computer, each step is still mostly the model's time: a larger hosted model
+  (or a bigger local one on a GPU) is much faster than a small local model on a CPU.
+- **Buttons it finds:** real buttons and links, and the divs and labels sites style as buttons (an "Upload résumé"
+  label, an "Apply now →" div), including inside web components. Apply, next, upload and sign-in buttons are read
+  first, so a long site menu never crowds them out. "Ready to submit" is only ever said on a page with a Submit button.
 - **Your answers stick:** each question is headed by the form's own words, with the site's help text, and
   the field is outlined in the view while you answer. Your answers are kept for the whole application, so a
   site that re-renders its form (Oracle, Workday) or a page you come back to is filled from them, not asked

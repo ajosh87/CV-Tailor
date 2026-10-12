@@ -69,6 +69,16 @@ OBSERVE_JS = r"""
     return questionOf(holder || first.closest('label') || first).slice(0, 200);
   };
   const isChecked = el => !!el.checked || el.getAttribute('aria-checked') === 'true';
+  // Many application systems build their forms from web components: look inside open shadow roots as well.
+  const deepAll = sel => {
+    const out = [];
+    const walk = root => {
+      root.querySelectorAll(sel).forEach(e => out.push(e));
+      root.querySelectorAll('*').forEach(e => { if (e.shadowRoot) walk(e.shadowRoot); });
+    };
+    walk(document);
+    return out;
+  };
 
   document.querySelectorAll('[data-cvt]').forEach(el => el.removeAttribute('data-cvt'));
   let n = 0;
@@ -81,9 +91,17 @@ OBSERVE_JS = r"""
     const about = norm(form.innerText) + ' ' + (form.getAttribute('action') || '') + ' ' + (form.getAttribute('aria-label') || '');
     if (form.getAttribute('role') === 'search' || (count <= 3 && /search|job alerts?|newsletter|subscribe|talent (community|network)|sign up for|keyword/i.test(about))) notApplication.add(form);
   }
+  // Chat widgets (support bots, recruiting assistants) aren't part of the application: never read, never filled.
+  const CHAT = '[id*="intercom" i], [class*="intercom" i], [id*="drift" i], [class*="drift-" i], [id*="zendesk" i], ' +
+               '[class*="zEWidget" i], [id*="hubspot-messages" i], [id*="livechat" i], [class*="livechat" i], [id*="tidio" i], ' +
+               '[class*="crisp-client" i], [id*="olark" i], [id*="freshchat" i], [id*="fc_frame" i], [class*="chatbot" i], ' +
+               '[id*="chatbot" i], [class*="chat-widget" i], [id*="chat-widget" i], [class*="botpress" i], [id*="tawk" i], ' +
+               '[class*="paradox" i], [id*="phenom-chat" i], [class*="phenom-chat" i], [class*="landbot" i], [id*="ada-embed" i]';
+  const inChat = el => { try { return !!el.closest(CHAT); } catch (e) { return false; } };
   const outside = el => {
     const host = el.closest('form, [role=search]');
-    return (host && notApplication.has(host)) || !!el.closest('nav, header, footer, [role=search], [role=navigation], [role=banner], [role=contentinfo]');
+    return (host && notApplication.has(host)) || inChat(el)
+      || !!el.closest('nav, header, footer, [role=search], [role=navigation], [role=banner], [role=contentinfo]');
   };
   // Lists that belong to a dropdown (its popup) are read as that dropdown's options, not as fields of their own.
   const popups = new Set();
@@ -100,7 +118,7 @@ OBSERVE_JS = r"""
   const holderKeys = new Map();
   const secretOf = (el, label) => (el.getAttribute('type') || '').toLowerCase() === 'password' || SECRET.test(label);
 
-  for (const el of document.querySelectorAll(FIELDS)) {
+  for (const el of deepAll(FIELDS)) {
     const tag = el.tagName.toLowerCase(), type = (el.getAttribute('type') || '').toLowerCase(), role = el.getAttribute('role') || '';
     if (['hidden', 'submit', 'button', 'image', 'reset'].includes(type) || el.disabled || el.getAttribute('aria-disabled') === 'true' || outside(el)) continue;
     if (type === 'search' && !el.closest('form')) continue;
@@ -172,20 +190,69 @@ OBSERVE_JS = r"""
       if (el.getAttribute('maxlength') && +el.getAttribute('maxlength') > 0) f.maxlength = +el.getAttribute('maxlength');
     }
     f.secret = secretOf(el, label);
+    f.name = (el.getAttribute('name') || el.id || '').slice(0, 60);
+    if (!f.secret && f.filled) {
+      const shown = tag === 'select' ? (el.multiple ? (f.selected || []).join('; ') : norm((el.options[el.selectedIndex] || {}).text))
+        : (role === 'combobox' && tag !== 'input') ? norm(el.innerText) : (f.selected ? f.selected.join('; ') : norm(el.value));
+      f.value = (shown || '').slice(0, 300);
+    }
     fields.push(f);
     if (fields.length >= 150) break;
   }
-  for (const g of Object.values(groups)) { g.required = g.required || /\*\s*$/.test(g.label); g.secret = false; fields.push(g); }
-  for (const el of document.querySelectorAll('button, [role=button], input[type=submit], input[type=button], a[href]')) {
+  for (const g of Object.values(groups)) {
+    g.required = g.required || /\*\s*$/.test(g.label); g.secret = false;
+    if (g.filled) g.value = g.kind === 'multi' ? g.selected.join('; ') : (g.options[g.ids.findIndex(i => { const e = document.querySelector('[data-cvt="' + i + '"]'); return e && isChecked(e); })] || '');
+    fields.push(g);
+  }
+  // What can be clicked: real buttons and links, and the divs, spans and labels sites style as buttons. The ones
+  // that move an application on (apply, next, upload, sign in...) come first; site menus, headers and footers only
+  // when they say one of those words, so they never crowd out the button that matters.
+  const KEY = /apply|next|continue|submit|review|sign ?in|log ?in|create|register|upload|attach|r[ée]sum[ée]|\bcv\b|autofill|start|proceed|save|account|manual|guest|accept|reject|decline|necessary|back|process|interview|glassdoor|indeed/i;
+  const CLICKY = 'button, [role=button], input[type=submit], input[type=button], a[href], [onclick], label[for], [tabindex="0"], ' +
+                 '[class*="btn" i], [class*="button" i], [data-automation-id*="button" i], [data-automation-id*="apply" i]';
+  const found = [];
+  for (const el of deepAll(CLICKY)) {
     if (!vis(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
     const host = el.closest('form, [role=search]');
-    if (host && notApplication.has(host)) continue;
-    if (el.closest('[role=listbox]')) continue;
-    const text = norm(el.innerText || el.value || el.getAttribute('aria-label'));
+    if ((host && notApplication.has(host)) || el.closest('[role=listbox]') || inChat(el)) continue;
+    if (el.matches(FIELDS)) continue;  // a field, read above
+    const tag = el.tagName;
+    if (tag === 'LABEL') { const target = byId(el.htmlFor); if (!target || (target.type || '') !== 'file') continue; }  // an upload button
+    const text = norm(el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title'));
     if (!text || text.length > 60) continue;
-    if (el.tagName === 'A' && !/apply|next|continue|sign|log ?in|create|register|submit|review|back|save|start|account|autofill|manual|guest|proceed|reject|decline|necessary|accept|glassdoor|indeed|process|interview/i.test(text)) continue;
-    buttons.push({id: mark(el), text, box: box(el), href: el.tagName === 'A' ? el.href : ''});
-    if (buttons.length >= 40) break;
+    const key = KEY.test(text);
+    const real = tag === 'BUTTON' || tag === 'INPUT' || el.getAttribute('role') === 'button';
+    if (!real && !key) continue;  // a link or a styled div only when it says what it does
+    const chrome = !!el.closest('nav, header, footer, [role=navigation], [role=banner], [role=contentinfo]');
+    if (chrome && !key) continue;
+    found.push({el, text, rank: key ? (chrome ? 1 : 0) : 2});
+  }
+  // A styled wrapper around a real button with the same words: keep the real button.
+  const keep = found.filter(c => !found.some(o => o !== c && c.el.contains(o.el) && o.text === c.text));
+  keep.sort((a, b) => a.rank - b.rank);
+  for (const c of keep.slice(0, 80)) {
+    buttons.push({id: mark(c.el), text: c.text, box: box(c.el), href: c.el.tagName === 'A' ? c.el.href : ''});
+  }
+  // Popups on top of the page (newsletter, "join our talent community", surveys...): what they say, whether they hold
+  // form fields, and their non-committal way out (×, Close, No thanks, Not now...), so a harmless one can be closed.
+  const CLOSE = /^(×|✕|✖|x|close|close (this )?(dialog|window|popup|modal)|no,? thanks?|no thank you|not now|maybe later|later|dismiss|skip|i'?m not interested|not interested|continue without [a-z ]{1,20}|stay on (this )?page)$/i;
+  const dialogs = [];
+  for (const d of deepAll('[role=dialog], [role=alertdialog], [aria-modal="true"], dialog[open], [class*="modal" i], [class*="popup" i], [class*="overlay" i], [class*="lightbox" i]')) {
+    if (!vis(d) || inChat(d)) continue;
+    const r = d.getBoundingClientRect();
+    if (r.width < 200 || r.height < 80 || dialogs.some(x => x.el.contains(d) || d.contains(x.el))) continue;
+    const text = norm(d.innerText).slice(0, 400);
+    if (!text) continue;
+    const fieldsInside = [...d.querySelectorAll('input:not([type=hidden]), select, textarea')].filter(vis)
+      .filter(i => !/^(email|checkbox|submit|button)$/i.test(i.getAttribute('type') || '')).length;
+    let close = null;
+    for (const b of d.querySelectorAll('button, [role=button], a, [aria-label], [title]')) {
+      if (!vis(b)) continue;
+      const said = norm(b.innerText || b.getAttribute('aria-label') || b.getAttribute('title'));
+      if (CLOSE.test(said) || /^(close|dismiss)\b/i.test(b.getAttribute('aria-label') || '')) { close = b; break; }
+    }
+    dialogs.push({el: d, text, fields: fieldsInside, close,
+                  closeText: close ? norm(close.innerText || close.getAttribute('aria-label') || close.getAttribute('title')).slice(0, 40) : ''});
   }
   const texts = sel => [...document.querySelectorAll(sel)].filter(vis).map(e => norm(e.innerText)).filter(Boolean);
   return {
@@ -198,11 +265,18 @@ OBSERVE_JS = r"""
       .some(e => vis(e) && !/size=invisible/.test(e.getAttribute('src') || '') && e.getAttribute('data-size') !== 'invisible' && !e.closest('.grecaptcha-badge') && e.getBoundingClientRect().height > 30),
     password_fields: [...document.querySelectorAll('input[type=password]')].filter(vis).length,
     fields, buttons,
+    dialogs: dialogs.slice(0, 4).map(x => ({text: x.text, fields: x.fields, close_text: x.closeText,
+                                            close_id: x.close ? (x.close.getAttribute('data-cvt') || mark(x.close)) : ''})),
+    chat: deepAll(CHAT).filter(vis).length > 0,
   };
 }
 """
 
 _CAPTCHA_FRAMES = re.compile(r"recaptcha|hcaptcha|challenges\.cloudflare\.com|arkoselabs|funcaptcha", re.I)
+# Chat widgets load in frames from these: never read as part of the application.
+_CHAT_FRAMES = re.compile(r"intercom|drift\.com|driftt|zendesk|zdassets|hubspot.*(messages|conversations)|usemessages|livechatinc|"
+                          r"tidio|crisp\.chat|olark|freshchat|wchat\.|ada\.support|paradox\.ai|botpress|tawk\.to|landbot|"
+                          r"chatbot|phenompeople\.com/.*chat", re.I)
 
 
 class NotKept(Exception):
@@ -214,6 +288,33 @@ class NotKept(Exception):
         self.options = options or []
 
 
+class Covered(Exception):
+    """Something on the page sits on top of the element the assistant tried to click."""
+
+    def __init__(self, cover: str) -> None:
+        super().__init__(f"covered by {cover}")
+        self.cover = cover
+
+
+def covered_by(exc: Exception) -> str:
+    """'<div class="newsletter-modal">' from Playwright's "... intercepts pointer events", or ""."""
+    m = re.search(r"(<[^\n<>]{1,160}>)[^\n]{0,80}intercepts pointer events", str(exc))
+    if not m:
+        return ""
+    tag = re.sub(r"\s+", " ", m.group(1))
+    return tag if len(tag) <= 120 else tag[:119] + "…>"
+
+
+def _click(loc, **kw) -> None:
+    try:
+        loc.click(**kw)
+    except Exception as exc:
+        cover = covered_by(exc)
+        if cover:
+            raise Covered(cover) from exc
+        raise
+
+
 def observe(page) -> dict:
     """Read the page and any embedded application frames (some sites put the form in an iframe)."""
     info = page.main_frame.evaluate(OBSERVE_JS, "")
@@ -222,12 +323,16 @@ def observe(page) -> dict:
         if _CAPTCHA_FRAMES.search(frame.url or ""):
             info["captcha"] = info["captcha"] or _visible_challenge(frame)
             continue
+        if _CHAT_FRAMES.search(frame.url or ""):
+            info["chat"] = True
+            continue
         if not (frame.url or "").startswith("http"):
             continue
         try:
             sub = frame.evaluate(OBSERVE_JS, f"f{n}-")
         except Exception:  # detached or cross-origin frame that refuses scripts
             continue
+        info["dialogs"] = info.get("dialogs", []) + sub.get("dialogs", [])
         if sub["fields"] or sub["buttons"]:
             info["fields"] += sub["fields"]
             info["buttons"] += sub["buttons"]
@@ -391,7 +496,7 @@ def perform(page, action, field: dict | None = None) -> str:
         return "attached"
     if action.op == "click":
         loc.scroll_into_view_if_needed(timeout=5000)
-        loc.click(timeout=8000)
+        _click(loc, timeout=8000)
         return "clicked"
     raise ValueError(f"unknown action {action.op}")
 

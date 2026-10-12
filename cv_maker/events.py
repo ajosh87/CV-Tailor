@@ -22,7 +22,7 @@ _LEVELS = {"error": logging.ERROR, "warn": logging.WARNING}
 
 
 class Feed:
-    def __init__(self, size: int = 800) -> None:
+    def __init__(self, size: int = 2000) -> None:
         self._events: deque = deque(maxlen=size)
         self._lock = threading.Lock()
         self._seq = itertools.count(1)
@@ -43,10 +43,16 @@ class Feed:
         _log.log(_LEVELS.get(event["kind"], logging.INFO), text, extra={"task": tag or "app"})
         return event
 
-    def since(self, seq: int = 0, limit: int = 300) -> list[dict]:
+    def since(self, seq: int = 0, limit: int = 2000) -> list[dict]:
         with self._lock:
             events = [e for e in self._events if e["seq"] > seq]
         return events[-limit:]
+
+    def skipped(self, seq: int, events: list[dict]) -> int:
+        """How many events after `seq` aren't in `events` (dropped from memory, or past the limit): the log file
+        still has them."""
+        first = events[0]["seq"] if events else self.last_seq() + 1
+        return max(0, first - seq - 1)
 
     def last_seq(self) -> int:
         with self._lock:
@@ -117,6 +123,12 @@ class Feed:
         totals["llm_seconds"] = round(totals["llm_seconds"], 1)
         totals["uptime"] = round(now - self.started)
         return {"now": now, "active": active, "recent": recent, "session": totals}
+
+
+def clip(text, limit: int) -> str:
+    """`text` for a log line: whole when it fits, otherwise cut at `limit` with "…" so the cut shows."""
+    text = " ".join(str(text or "").split())
+    return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
 
 
 def estimate_tokens(text: str) -> int:

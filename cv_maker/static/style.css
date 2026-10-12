@@ -994,3 +994,10 @@ details.edit-role .edit-block { border: 0; padding: 0; margin: 0; background: no
 details.acc.add-new { margin-top: 8px; border-style: dashed; }
 details.acc.add-new > summary { color: var(--muted); font-weight: 500; }
 details.acc.add-new .edit-block { border: 0; padding: 0; margin: 0; background: none; }
+
+/* ---- what needs you, field by field ---- */
+ul.attention { list-style: none; display: grid; gap: 4px; padding: 0; margin: 8px 0 0; }
+ul.attention li { padding: 6px 10px; border-left: 3px solid var(--warn); background: color-mix(in srgb, var(--warn) 7%, transparent);
+  border-radius: 0 6px 6px 0; cursor: default; }
+ul.attention li[tabindex="0"] { cursor: pointer; }
+ul.attention li:hover, ul.attention li:focus { background: color-mix(in srgb, var(--warn) 13%, transparent); outline: none; }

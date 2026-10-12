@@ -66,3 +66,17 @@ def test_settings_says_how_many_problems_there_were(tmp_path):
     logging.getLogger("cv_maker.test").error("something broke")
     page = app.test_client().get("/settings").data.decode()
     assert "1 error and 0 warnings in the last day" in page
+
+
+def test_feed_lines_say_when_they_were_cut_and_the_nerdbar_hears_about_gaps():
+    from cv_maker.events import Feed, clip
+
+    assert clip("Are you currently a full time or part time employee here?", 200).endswith("here?")
+    assert clip("x" * 300, 200) == "x" * 199 + "…"  # cut where really long, and the cut shows
+    small = Feed(size=5)
+    for i in range(12):
+        small.emit("info", f"line {i}")
+    events = small.since(0)
+    assert [e["text"] for e in events] == [f"line {i}" for i in range(7, 12)]
+    assert small.skipped(0, events) == 7  # only in the log file now: the nerdbar says so instead of a silent gap
+    assert small.skipped(events[-1]["seq"], []) == 0

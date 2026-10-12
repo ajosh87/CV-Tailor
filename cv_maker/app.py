@@ -349,7 +349,9 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
     @app.route("/api/events")
     def api_events():
         """The nerdbar's live feed: what ran, for how long, and how many tokens it used (in memory only)."""
-        return jsonify({"events": feed.since(request.args.get("after", default=0, type=int)), "stats": feed.stats()})
+        after = request.args.get("after", default=0, type=int)
+        events = feed.since(after)
+        return jsonify({"events": events, "skipped": feed.skipped(after, events), "stats": feed.stats()})
 
     # ---- home & old addresses ----
 
@@ -1294,7 +1296,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
                 return jsonify({"ok": True})
             return jsonify({"ok": False, "message": "The assistant isn't running. Resume it first."}), 409
         if action in ("pause", "resume", "stop", "input", "nav", "answer", "allow_site", "account_fill", "approve_submit",
-                      "mark_submitted"):
+                      "mark_submitted", "save_typed"):
             if action == "answer":
                 answers = body.get("answers")
                 if not isinstance(answers, list) or len(answers) > 50:

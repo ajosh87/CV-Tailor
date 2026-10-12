@@ -65,7 +65,7 @@ def test_consent_is_yours_and_marketing_is_left_alone():
 
 
 def test_the_llm_can_never_click_submit_or_create_an_account():
-    page = {"fields": [_field("c0", "Years of Python")], "buttons": [
+    page = {"fields": [_field("c0", "Years of Python *", required=True)], "buttons": [
         {"id": "c1", "text": "Submit Application"}, {"id": "c2", "text": "Create Account"}, {"id": "c3", "text": "Next"}]}
     allowed = planner.for_llm(page, set())
     assert planner.parse_plan({"next": {"do": "click", "id": "c1"}}, page, allowed).next == "ready_to_submit"
@@ -351,7 +351,8 @@ def test_secret_fields_vague_questions_and_answers_that_outlive_a_re_render():
     details = {**DETAILS, "standard": {**DETAILS["standard"], "postal_code": "600001"}}
     actions, _ = planner.by_rule(page, details, {})
     assert [a.id for a in actions] == ["c1"]  # an Indian PIN code is a postal code; a PIN is never filled
-    assert [f["id"] for f in planner.for_llm(page, set())] == ["c1", "c2"]  # the PIN never reaches the LLM
+    assert [f["id"] for f in planner.for_llm(page, set())] == ["c2"]  # the PIN never reaches the LLM; optional fields stay yours
+    assert [f["id"] for f in planner.optional_left(page, set())] == ["c1"]
     assert planner.ask_required(pin)["kind"] == "secret"
 
     vague = planner.parse_plan({"ask": [{"id": "c2", "question": "What is this question asking?"}]}, page, page["fields"])
@@ -443,3 +444,119 @@ def test_a_local_model_has_no_cap_or_pace(tmp_path):
     save_settings(tmp_path, {"LLM_PROVIDER": "ollama", "LLM_MODEL": "llama3"})
     local = llm_limits(tmp_path)
     assert (local["rpm"], local["daily"], local["local"]) == (0, 0, True)
+
+
+@needs_browser
+def test_buttons_the_assistant_used_to_miss_are_found_first():
+    from playwright.sync_api import sync_playwright
+
+    from cv_maker.apply import page as pg
+
+    menu = "".join(f'<a href="/p{i}">Menu item {i}</a>' for i in range(50))
+    html = f"""<header><nav>{menu}<a href="/careers">Careers</a></nav></header>
+      <main><h1>ML Engineer</h1><p>Send us your résumé.</p>
+      <div class="btn-apply" onclick="1">Apply now →</div>
+      <div id="host"></div>
+      <label for="cv" class="upload-btn">Upload résumé</label><input type="file" id="cv" name="resume_file" style="display:none">
+      </main>
+      <script>
+        const root = document.getElementById('host').attachShadow({{mode: 'open'}});
+        root.innerHTML = '<button>Apply with LinkedIn</button>';
+      </script>"""
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.set_content(html)
+        info = pg.observe(page)
+        browser.close()
+    texts = [b["text"] for b in info["buttons"]]
+    assert texts[:3] == ["Apply now →", "Apply with LinkedIn", "Upload résumé"] or set(texts[:3]) == {"Apply now →", "Apply with LinkedIn", "Upload résumé"}
+    assert "Menu item 3" not in texts  # site menus don't crowd out the buttons that matter
+    assert planner.navigation(info)[0] == "click"  # "Apply now →" is a start button, arrow and all
+    upload = next(f for f in info["fields"] if f["kind"] == "file")
+    assert planner.pending_documents(info)["cv"]["id"] == upload["id"]  # known as the résumé upload by its name
+
+
+def test_submit_needs_a_submit_button_and_echoes_are_not_answers():
+    page = {"fields": [_field("c0", "Middle Name *", required=True)], "buttons": [{"id": "c1", "text": "Next"}]}
+    plan = planner.parse_plan({"fill": [{"id": "c0", "value": "Middle Name"}], "next": {"do": "ready_to_submit"},
+                               "note": "one short sentence on what you did"}, page, page["fields"])
+    assert plan.actions == [] and (plan.next, plan.next_id) == ("click", "c1") and plan.note == ""
+
+
+def test_a_pause_says_which_fields_need_you_and_what_you_typed_is_kept(tmp_path, monkeypatch):
+    from cv_maker.apply import session as apply_session
+
+    store = Store(tmp_path / "db.sqlite")
+    app_details.save(store, STANDARD)
+    run = store.create_run(job_url="https://careers.acme.com/job/1", status="ready")
+    application = store.create_application(run, 1, "https://careers.acme.com/apply")
+    session = apply_session.ApplySession(application=application, store=store, get_model=lambda: None,
+                                         browser_dir=tmp_path / "b", files={"cv": "cv.docx", "letter": ""}, job_label="x", job_context="")
+    info = {"title": "Questions", "errors": ["Please enter your notice period"], "fields": [
+        _field("c0", "Notice period *", required=True, box=[1, 2, 3, 4]),
+        _field("c1", "Enter your PIN *", required=True, secret=True),
+        _field("c2", "Middle name")], "buttons": []}
+    session._optional = [info["fields"][2]]
+    attention = session._attention(info)
+    assert [(a["label"], a["why"]) for a in attention][:3] == [
+        ("Notice period", "required and still empty"), ("Enter your PIN", "required: a password, code or ID number, for you to type"),
+        ("The page says", "Please enter your notice period")]
+    assert attention[-1]["why"].startswith("optional")
+
+    session.last_observation = info
+    typed = {**info, "fields": [{**info["fields"][0], "filled": True, "value": "30 days"},
+                                {**info["fields"][1], "filled": True, "value": "1234"}]}
+    monkeypatch.setattr(apply_session.pg, "observe", lambda page: typed)
+    session.page = types.SimpleNamespace(url="https://careers.acme.com/apply")
+    session._note_what_you_typed()
+    saved = store.get_application(application.id)
+    assert saved.answers == {"notice period": "30 days"}  # never the PIN
+    assert [(f["label"], f["value"], f["source"]) for f in saved.filled] == [("Notice period *", "30 days", "typed")]
+    session._command({"action": "save_typed"})
+    assert app_details.load(store)["custom"][0] == {"question": "Notice period *", "answer": "30 days"}
+
+
+def test_forms_get_a_compact_profile_unless_they_ask_for_writing():
+    from cv_maker.apply.session import _form_profile
+    profile = Profile(name="Ada", email="", phone="", location="", links={}, target_role=None, education=[],
+                      skills=[Skill("Python", "cv")], extras={},
+                      experiences=[Experience("Northwind", "Engineer", "", "2021", None, True, ["Built Python APIs used by 3 teams"], True)])
+    assert "Built Python APIs" not in _form_profile(profile, [_field("c0", "Notice period")])
+    assert "Built Python APIs" in _form_profile(profile, [_field("c0", "Why do you want this job?", kind="textarea")])
+
+
+@needs_browser
+def test_chat_widgets_are_ignored_harmless_popups_closed_and_a_covered_button_named():
+    from playwright.sync_api import sync_playwright
+
+    from cv_maker.apply import page as pg
+
+    html = """<main><h1>Your details</h1><label for="n">Notice period *</label><input id="n" required>
+        <button id="next" style="position:relative">Next</button></main>
+      <div id="intercom-container" style="position:fixed;right:0;bottom:0;width:300px;height:300px">
+        <input placeholder="Type a message"><button>Send</button></div>
+      <div role="dialog" aria-modal="true" class="modal" style="position:fixed;left:30px;top:30px;width:400px;height:200px;background:#fff">
+        <p>Join our talent community and get job alerts first!</p><input type="email"><button>Subscribe</button>
+        <button aria-label="Close">×</button></div>
+      <div role="dialog" class="modal" style="position:fixed;left:30px;top:260px;width:400px;height:120px;background:#fff">
+        <p>Before you continue your application, confirm your email.</p><button>Close</button></div>"""
+    with sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.set_content(html)
+        info = pg.observe(page)
+        assert info["chat"] and not [f for f in info["fields"] if "message" in f["label"].lower()]
+        assert "Send" not in [b["text"] for b in info["buttons"]]  # the chat widget never reaches the LLM
+        popups = planner.dismissable(info)
+        assert [p["text"][:20] for p in popups] == ["Join our talent comm"]  # never the one about the application
+        pg.perform(page, planner.Action("click", popups[0]["close_id"]), None)
+        page.evaluate("document.querySelectorAll('[role=dialog]').forEach(d => { if (d.textContent.includes('talent')) d.remove(); })")
+        page.evaluate("""() => { const o = document.createElement('div'); o.className = 'newsletter-overlay';
+                               o.style.cssText = 'position:fixed;inset:0;z-index:9'; document.body.appendChild(o); }""")
+        info = pg.observe(page)
+        nxt = next(b for b in info["buttons"] if b["text"] == "Next")
+        with pytest.raises(pg.Covered) as covered:
+            pg.perform(page, planner.Action("click", nxt["id"]), None)
+        browser.close()
+    assert "newsletter-overlay" in covered.value.cover

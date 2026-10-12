@@ -4,6 +4,7 @@ can watch, pause, take over and resume from the app.
 Playwright isn't thread-safe, so every browser call happens on the session's own thread. The web app
 talks to it through a queue of commands, and reads its state and latest screenshot.
 """
+import json
 import logging
 import queue
 import re
@@ -17,7 +18,7 @@ from cv_maker.apply import accounts
 from cv_maker.apply import details as app_details
 from cv_maker.apply import page as pg
 from cv_maker.apply import planner
-from cv_maker.events import feed
+from cv_maker.events import clip, feed
 from cv_maker import tenure
 from cv_maker.honesty import allowed_facts_text, allowed_numbers_text, filter_text
 from cv_maker.jobs import polite
@@ -70,6 +71,8 @@ class ApplySession(threading.Thread):
         self._errors = 0
         self._submit_clicked = False
         self._cookie_sites: set[str] = set()
+        self._dismissed: set[tuple] = set()  # (site, what the popup said): each closed once, never in a loop
+        self._chat_sites: set[str] = set()
         self._details: dict = {}
         self._secrets: list = []
         self._signed_in: dict[str, int] = {}  # site -> sign-ins tried with your saved account (never loops)
@@ -139,7 +142,71 @@ class ApplySession(threading.Thread):
                     feed.emit("apply", "looks like you're through: carrying on")
                     return self._carry_on()
 
+    def _attention(self, info: dict) -> list[dict]:
+        """What on this page needs you, field by field: [{"label", "why", "box"}], most urgent first."""
+        out, seen = [], set()
+
+        def add(f, why):
+            label = (f.get("label") or "A field without a label").strip(" *:")
+            if f["id"] not in seen:
+                seen.add(f["id"])
+                out.append({"label": label[:120], "why": why, "box": f.get("box")})
+
+        errors = " ".join(info.get("errors") or []).casefold()
+        for f in info["fields"]:
+            if not f.get("filled") and f.get("required"):
+                if planner.is_secret(f):
+                    add(f, "required: a password, code or ID number, for you to type")
+                elif planner.norm_label(f.get("label", "")) in self._not_kept:
+                    add(f, "required: the site didn't keep the answer; pick or type it in the view")
+                elif f.get("kind") == "file":
+                    add(f, "required upload: attach the file in the view")
+                else:
+                    add(f, "required and still empty")
+        for f in info["fields"]:
+            label = planner.norm_label(f.get("label", ""))
+            if label and label in errors:
+                add(f, "the site shows an error for it")
+        for message in (info.get("errors") or [])[:3]:
+            out.append({"label": "The page says", "why": message[:160], "box": None})
+        for f in getattr(self, "_optional", [])[:6]:
+            add(f, "optional: left for you to fill in or skip")
+        return out[:12]
+
+    def _note_what_you_typed(self) -> None:
+        """Fields you filled in yourself in the view are yours: kept for the rest of this application (and shown in
+        the review), so a page that comes back is filled from them. Never a password, code or ID number."""
+        before = {f["id"]: f for f in (self.last_observation or {}).get("fields", [])}
+        try:
+            now = pg.observe(self.page)
+        except Exception:
+            return
+        assisted = {(x.get("page"), x.get("label")) for x in (self.store.get_application(self.app_id).filled or [])}
+        typed = []
+        for f in now["fields"]:
+            label = planner.norm_label(f.get("label", ""))
+            if (not f.get("filled") or planner.is_secret(f) or f.get("kind") in ("file", "password", "checkbox") or not label
+                    or not f.get("value") or (now.get("title") or "", f.get("label", "")) in assisted):
+                continue
+            was = before.get(f["id"]) or {}
+            if was.get("filled") and was.get("value") == f.get("value"):
+                continue  # already there before you took over
+            if self._answers.get(label) != f["value"]:
+                self._answers[label] = f["value"]
+                typed.append({"page": now.get("title") or "", "label": f.get("label", ""), "value": f["value"], "source": "typed"})
+        if typed:
+            with self.store.locked():
+                application = self.store.get_application(self.app_id)
+                if application is not None:
+                    latest = {(x["page"], x["label"]): x for x in application.filled + typed}
+                    application.filled = list(latest.values())[-300:]
+                    application.answers = dict(self._answers)
+                    self.store.update_application(application)
+            feed.emit("user", f"✓ noted {len(typed)} answer{'s' if len(typed) != 1 else ''} you typed in the view")
+
     def _carry_on(self) -> None:
+        if self.mode == "paused" and self.page is not None and _web(self.page.url):
+            self._note_what_you_typed()
         self.mode = "agent"
         self.pause_requested.clear()
         self._same_page, self._last_signature = 0, None
@@ -342,6 +409,22 @@ class ApplySession(threading.Thread):
             pg.perform(page, planner.Action("click", banner[1]), None)
             pg.settle(page)
             info = self._read()
+        if info.get("chat") and site not in self._chat_sites:
+            self._chat_sites.add(site)
+            feed.emit("apply", "ignoring this site's chat widget: it isn't part of the application")
+        for popup in planner.dismissable(info)[:3]:
+            key = (site, popup["text"][:80])
+            if key in self._dismissed:
+                continue
+            self._dismissed.add(key)
+            feed.emit("apply", f"closed a popup that isn't part of the application: “{clip(popup['text'], 90)}” "
+                               f"({popup.get('close_text') or 'close'})")
+            try:
+                pg.perform(page, planner.Action("click", popup["close_id"]), None)
+                pg.settle(page)
+            except Exception as exc:
+                logger.info("application %s: the popup didn't close: %s", self.app_id[:6], exc)
+            info = self._read()
         block = planner.blocker(info)
         if block == "human":
             return self._wait_for_you("human", "This page wants proof that you're human. Solve it in the view, then press Resume.")
@@ -351,8 +434,9 @@ class ApplySession(threading.Thread):
         if block == "account":
             return self._account_needed(info)
         if self._no_progress(info):
-            return self._wait_for_you("stuck", "The assistant isn't getting further on this page. Have a look (there may be "
-                                               "an error to fix), then press Resume.")
+            return self._wait_for_you("stuck", "The assistant isn't getting further on this page: pressing on changes "
+                                               "nothing. The fields below are the likely reason; fix them in the view, then press Resume.",
+                                      attention=self._attention(info))
 
         docs = self.documents()
         files = docs or {"cv": "", "letter": ""}  # until the CV exists, everything but the uploads
@@ -377,6 +461,7 @@ class ApplySession(threading.Thread):
             return self._wait_for_documents()
         rule_actions, questions = planner.by_rule(info, details, files)
         fields = planner.for_llm(info, handled={a.id for a in rule_actions})
+        self._optional = planner.optional_left(info, {a.id for a in rule_actions})
         navigation = self._navigation_by_rule(info)
         plan = self._ask_llm(info, fields) if fields or navigation is None else planner.Plan(*navigation)
         if navigation is not None and not plan.actions and plan.next in ("wait", "done"):
@@ -407,8 +492,9 @@ class ApplySession(threading.Thread):
         if questions:
             return self._wait_for_you("question", "A few questions need your answer.", questions=questions)
         if not plan.actions and plan.next in ("wait", "done"):
-            return self._wait_for_you("stuck", "The assistant isn't sure how to continue on this page. Have a look, then "
-                                               "press Resume (or finish it yourself in the view).")
+            return self._wait_for_you("stuck", "The assistant couldn't find how to go on from this page. Check the fields "
+                                               "below, use the page's own button in the view, then press Resume.",
+                                      attention=self._attention(info))
         self._move_on(plan, info)
 
     def _read(self) -> dict:
@@ -416,7 +502,7 @@ class ApplySession(threading.Thread):
         self.last_observation = info
         self._save(current_url=self.page.url)
         empty = sum(not f.get("filled") for f in info["fields"])
-        feed.emit("apply", f"read {re.sub(r'[?#].*$', '', self.page.url)[:80]} · {len(info['fields'])} fields "
+        feed.emit("apply", f"read {clip(re.sub(r'[?#].*$', '', self.page.url), 160)} · {len(info['fields'])} fields "
                            f"({empty} empty) · {len(info['buttons'])} buttons")
         return info
 
@@ -437,7 +523,7 @@ class ApplySession(threading.Thread):
         self._model_name = model_name(model)
         if isinstance(model, PrivateModel):
             model = model.with_extra(self._secrets)
-        prompt = planner.build_prompt(info, fields, _prompt_profile(_to_plain(profile)) if profile else "{}", self._details_now(),
+        prompt = planner.build_prompt(info, fields, _form_profile(profile, fields) if profile else "{}", self._details_now(),
                                       self.job_label)
         data = complete_json(model, prompt)
         allowed = allowed_facts_text(profile, self.job_context) if profile else ""
@@ -466,21 +552,30 @@ class ApplySession(threading.Thread):
             try:
                 pg.perform(self.page, action, field)
             except pg.NotKept as exc:
-                feed.emit("warn", f"! “{what[:60]}” didn't take the answer ({exc}); you'll be asked about it")
+                feed.emit("warn", f"! “{clip(what, 200)}” didn't take the answer ({exc}); you'll be asked about it")
                 self._not_kept[planner.norm_label(what)] = {"why": str(exc), "tried": "" if secret else action.value,
                                                             "options": exc.options}
                 if field is not None:
                     failed.append(field)
                 continue
+            except pg.Covered as exc:
+                feed.emit("warn", f"! “{clip(what, 200)}” is covered by something on the page ({exc.cover}); you'll be asked about it")
+                self._not_kept[planner.norm_label(what)] = {"why": f"something on the page covers it ({exc.cover}): close it in the view",
+                                                            "tried": "", "options": []}
+                if field is not None:
+                    failed.append(field)
+                continue
             except Exception as exc:
-                feed.emit("warn", f"! couldn't fill “{what[:60]}” ({type(exc).__name__}); you'll be asked about it")
+                cover = pg.covered_by(exc)
+                why = f"covered by {cover}" if cover else type(exc).__name__
+                feed.emit("warn", f"! couldn't fill “{clip(what, 200)}” ({why}); you'll be asked about it")
                 if field is not None:
                     failed.append(field)
                 continue
             self._not_kept.pop(planner.norm_label(what), None)
             shown = HIDDEN if secret else self._shown(action.shown or action.value)
-            why = f" · {self._shown(action.why)[:100]}" if getattr(action, "why", "") and not secret else ""
-            feed.emit("apply", f"{what[:60]} ← {shown[:80]}" + (" · by rule" if action.source == "rule" else "") + why)
+            why = f" · {clip(self._shown(action.why), 240)}" if getattr(action, "why", "") and not secret else ""
+            feed.emit("apply", f"{clip(what, 200)} ← {clip(shown, 300)}" + (" · by rule" if action.source == "rule" else "") + why)
             self.page.wait_for_timeout(polite.level()["field_pause_ms"])
             value = HIDDEN if secret else action.value if action.op != "upload" else action.shown
             filled.append({"page": info.get("title") or "", "label": what, "value": value, "source": action.source,
@@ -518,14 +613,21 @@ class ApplySession(threading.Thread):
             button = buttons[plan.next_id]
             self.target = button.get("box")
             feed.emit("apply", f"click “{button['text']}”")
-            pg.perform(self.page, planner.Action("click", plan.next_id), None)
+            try:
+                pg.perform(self.page, planner.Action("click", plan.next_id), None)
+            except pg.Covered as exc:
+                self.target = None
+                return self._wait_for_you("stuck", f"“{button['text']}” is covered by something on the page, so the click "
+                                                   "can't get through. Close it in the view, then press Resume.",
+                                          attention=[{"label": button["text"], "why": f"covered by {exc.cover}", "box": button.get("box")}]
+                                          + self._attention(info))
             pg.settle(self.page)
             self.page.wait_for_timeout(polite.level()["page_pause_ms"])
             self.target = None
         elif plan.next == "ready_to_submit":
             button = buttons.get(plan.next_id, {"text": "Submit"})
-            self._wait_for_you("submit", "Everything is filled in. Check the summary and the page, then approve the submit.",
-                               target=plan.next_id, button=button["text"])
+            self._wait_for_you("submit", "This is the last step. Check the summary and the page, then approve the submit.",
+                               target=plan.next_id, button=button["text"], attention=self._attention(info))
         elif plan.next == "account":
             self._account_needed(info)
         elif plan.next == "human":
@@ -664,6 +766,16 @@ class ApplySession(threading.Thread):
             self._wait_for_documents()
         elif action == "mark_submitted":
             self._done("you")
+        elif action == "save_typed":  # keep what you typed in the view for future applications
+            application = self.store.get_application(self.app_id)
+            saved = 0
+            for row in (application.filled if application else []):
+                if row.get("source") == "typed" and row.get("label") and row.get("value"):
+                    app_details.remember_answer(self.store, row["label"], row["value"])
+                    saved += 1
+            self._details = app_details.load(self.store)
+            self._secrets = app_details.secrets(self._details)
+            feed.emit("user", f"✓ saved {saved} answer{'s' if saved != 1 else ''} you typed for future applications")
 
     def _input(self, command: dict) -> None:
         """You, driving the browser from the live view."""
@@ -758,6 +870,18 @@ class ApplySession(threading.Thread):
         self._save(status="submitted", waiting={}, submitted_at=datetime.now(timezone.utc).isoformat(), submitted_by=by)
         feed.emit("ok", "✓ application submitted" + (" (marked by you)" if by == "you" else ""))
         self.stop_requested.set()
+
+
+def _form_profile(profile, fields: list[dict]) -> str:
+    """What a form needs from your profile: roles with dates and durations, skills, education, certifications. Your
+    bullets only when the form asks a written question (a text area), since they make each request several times
+    longer, which a model on your own computer feels most."""
+    plain = json.loads(_prompt_profile(_to_plain(profile)))
+    writing = any(f.get("kind") == "textarea" for f in fields)
+    if not writing:
+        plain["experiences"] = [{k: v for k, v in e.items() if k != "bullets"} for e in plain.get("experiences", [])]
+        plain.pop("summary", None)
+    return json.dumps(plain, ensure_ascii=False, indent=1)
 
 
 def _web(url: str) -> bool:

@@ -32,8 +32,18 @@
     if (el.textContent !== text) el.textContent = text;
   }
 
+  function gapLine(count, first) {
+    var row = document.createElement('div');
+    row.className = 'nb-line k-warn nb-gap';
+    row.textContent = first
+      ? '… ' + count + ' earlier line' + (count === 1 ? ' is' : 's are') + ' only in the log file (Settings → Log has everything)'
+      : '… ' + count + ' line' + (count === 1 ? '' : 's') + ' came and went while this was away: Settings → Log has them';
+    return row;
+  }
+
   function render(data) {
     var stuck = log.scrollHeight - log.scrollTop - log.clientHeight < 24;
+    if (data.skipped > 0) log.appendChild(gapLine(data.skipped, !primed));  // never a silent gap
     if (data.events.length) {
       var frag = document.createDocumentFragment();
       data.events.forEach(function (e) {

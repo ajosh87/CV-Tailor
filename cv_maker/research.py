@@ -25,7 +25,7 @@ from urllib.parse import quote, quote_plus, urljoin, urlparse
 
 import httpx
 
-from cv_maker.events import feed
+from cv_maker.events import clip, feed
 from cv_maker.jobs.html import page_links, page_text
 from cv_maker.jobs.polite import sites
 from cv_maker.jobs.urls import site_of
@@ -520,7 +520,7 @@ def _step(name: str, fetch, found: dict):
         return None
     except Exception as exc:  # an LLM error: keep everything else that was found
         found["skipped"].append({"source": name, "why": str(exc)[:200]})
-        feed.emit("warn", f"! research: {name}: {str(exc)[:120]}")
+        feed.emit("warn", f"! research: {name}: {clip(exc, 300)}")
         return None
     if isinstance(result, dict) and (result.get("allowed") is False or ("note" in result and not result.get("text"))):
         found["skipped"].append({"source": name, "why": result["note"]})

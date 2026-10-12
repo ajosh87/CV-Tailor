@@ -142,6 +142,7 @@
     }
     needs.hidden = false;
     needs.appendChild(el('p', {}, w.text));
+    if (w.attention && w.attention.length) needs.appendChild(attentionList(w.attention));
     var actions = el('div', {class: 'row mt-md'});
     if (w.kind === 'question') {
       needs.appendChild(questionForm(w.questions || []));
@@ -190,6 +191,23 @@
     needs.appendChild(actions);
   }
   // Each question is headed by the form's own words for the field; the field is outlined in the view while you're on it.
+  // Field by field, what needs you on this page and why; hovering one outlines it in the view.
+  function attentionList(items) {
+    var list = el('ul', {class: 'attention mt-sm'});
+    items.forEach(function (a) {
+      var li = el('li', {tabindex: a.box ? '0' : '-1'});
+      li.appendChild(el('strong', {}, a.label));
+      li.appendChild(el('span', {class: 'small muted'}, ' · ' + a.why));
+      if (a.box) {
+        var on = function () { hoverBox = a.box; drawTarget(hoverBox); };
+        var off = function () { hoverBox = null; drawTarget(null); };
+        li.addEventListener('mouseenter', on); li.addEventListener('focus', on);
+        li.addEventListener('mouseleave', off); li.addEventListener('blur', off);
+      }
+      list.appendChild(li);
+    });
+    return list;
+  }
   function questionForm(questions) {
     var form = el('form', {class: 'mt-md'});
     questions.forEach(function (q, i) {
@@ -287,6 +305,13 @@
   function renderFilled(filled) {
     if (filled.length === filledCount) return;
     filledCount = filled.length;
+    var typed = filled.filter(function (f) { return f.source === 'typed'; }).length, keep = $('ap-keep-typed');
+    if (typed && !keep && state.live) {
+      keep = el('div', {id: 'ap-keep-typed', class: 'row small mt-sm'});
+      keep.appendChild(el('span', {class: 'muted'}, 'You typed some answers yourself in the view.'));
+      keep.appendChild(button('Save them for future applications', 'link-btn small', {action: 'save_typed'}));
+      $('ap-filled').closest('table').parentNode.appendChild(keep);
+    }
     $('ap-filled-count').textContent = filled.length || '';
     var body = $('ap-filled');
     body.textContent = '';
@@ -295,7 +320,7 @@
       tr.appendChild(el('td', {class: 'faint'}, f.page));
       tr.appendChild(el('td', {}, f.label));
       tr.appendChild(el('td', {class: 'break'}, f.value));
-      var by = el('td', {class: 'faint nowrap'}, {rule: 'saved details', llm: 'LLM', you: 'you'}[f.source] || f.source);
+      var by = el('td', {class: 'faint nowrap'}, {rule: 'saved details', llm: 'LLM', you: 'you', typed: 'you, in the view'}[f.source] || f.source);
       if (f.model) { by.title = 'Decided by ' + f.model; by.appendChild(el('div', {class: 'by-model'}, f.model)); }
       tr.appendChild(by);
       body.appendChild(tr);
