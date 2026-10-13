@@ -84,6 +84,7 @@ class ApplySession(threading.Thread):
         self._secrets: list = []
         self._signed_in: dict[str, int] = {}  # site -> sign-ins tried with your saved account (never loops)
         self._last_watch = 0.0
+        self._last_sent_look = 0.0
         self._answers: dict[str, str] = dict(application.answers or {})  # your answers here, by the form's question
         self._not_kept: dict[str, dict] = {}  # question -> {"why", "tried", "options"}: what a site wouldn't keep
         self._guards: dict[str, list] = {k: list(v) for k, v in (application.guards or {}).items()}  # site -> bot detection
@@ -159,6 +160,11 @@ class ApplySession(threading.Thread):
                 if not planner.blocker(info) and (moved or not info.get("captcha")):
                     feed.emit("apply", "looks like you're through: carrying on")
                     return self._carry_on()
+        # Whatever it was waiting for, you may have sent the application yourself with the site's own button.
+        if now - self._last_sent_look >= 4.0:
+            self._last_sent_look = now
+            if self._sent_by_you():
+                return self._done("you", "you sent it in the view, and the site confirmed it")
 
     # ---- bot detection, and not lingering where it is ----
 
@@ -208,6 +214,14 @@ class ApplySession(threading.Thread):
                         "was": ((application.waiting or {}).get("text", "") if application else "")}
         feed.emit("user", f"■ {text}")
 
+    def _sent_by_you(self) -> bool:
+        """You sent the application yourself in the view: the site says it's received, and the form is gone."""
+        try:
+            look = pg.glance(self.page)
+        except Exception:
+            return False  # mid-navigation: the next look will do
+        return planner.confirmed(look) and look["inputs"] <= 2
+
     def _attention(self, info: dict) -> list[dict]:
         """What on this page needs you, field by field: [{"label", "why", "box"}], most urgent first."""
         out, seen = [], set()
@@ -221,7 +235,9 @@ class ApplySession(threading.Thread):
         errors = " ".join(info.get("errors") or []).casefold()
         for f in info["fields"]:
             if not f.get("filled") and f.get("required"):
-                if planner.is_secret(f):
+                if f.get("captcha"):
+                    add(f, "required: the site's CAPTCHA, for you to type from the picture in the view")
+                elif planner.is_secret(f):
                     add(f, "required: a password, code or ID number, for you to type")
                 elif planner.norm_label(f.get("label", "")) in self._not_kept:
                     add(f, "required: the site didn't keep the answer; pick or type it in the view")
@@ -563,6 +579,11 @@ class ApplySession(threading.Thread):
         if questions:
             return self._wait_for_you("question", "A few questions need your answer.", questions=questions)
         if not plan.actions and plan.next in ("wait", "done"):
+            greyed = next((t for t in info.get("greyed") or [] if planner.sends_application(t)), "")
+            if greyed:
+                return self._wait_for_you("stuck", f"“{greyed}” is greyed out: the site wants something more before it can "
+                                                   "be sent. Check the fields below and the page in the view, then press Resume.",
+                                          attention=self._attention(info))
             return self._wait_for_you("stuck", "The assistant couldn't find how to go on from this page. Check the fields "
                                                "below, use the page's own button in the view, then press Resume.",
                                       attention=self._attention(info))
@@ -938,9 +959,9 @@ class ApplySession(threading.Thread):
         self._wait_for_you("check", "Submitted, but the site hasn't confirmed it yet. Check the page: if the application "
                                     "went through, mark it as submitted; if there's an error, fix it in the view and Resume.")
 
-    def _done(self, by: str) -> None:
+    def _done(self, by: str, how: str = "") -> None:
         self._save(status="submitted", waiting={}, submitted_at=datetime.now(timezone.utc).isoformat(), submitted_by=by)
-        feed.emit("ok", "✓ application submitted" + (" (marked by you)" if by == "you" else ""))
+        feed.emit("ok", "✓ application submitted" + (f" ({how})" if how else " (marked by you)" if by == "you" else ""))
         self.stop_requested.set()
 
 

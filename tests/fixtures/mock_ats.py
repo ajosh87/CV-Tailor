@@ -2,7 +2,8 @@
 
 Job 1: posting -> sign in / create account -> my information -> experience (uploads) -> questions ->
 voluntary disclosures -> review -> thank you. Job 2 starts with a CAPTCHA-style check; job 5's sign-in page has
-invisible bot detection (what reCAPTCHA and Cloudflare's script leave on a page, without contacting either).
+invisible bot detection (what reCAPTCHA and Cloudflare's script leave on a page, without contacting either). Job 6 is
+one page (like Keka's): an image CAPTCHA under the privacy sentence, and "Apply Now", greyed out until it's complete.
 Test-only: it runs on localhost and accepts any account.
 """
 import threading
@@ -64,6 +65,26 @@ $("ms").addEventListener("click", () => {
 document.addEventListener("keydown", e => { if (e.key === "Escape") $("ms-list").hidden = true; });
 document.addEventListener("change", () => setTimeout(() => document.querySelectorAll("[data-cvt]").forEach(e => e.removeAttribute("data-cvt")), 30));
 </script>"""
+
+
+# Job 6's page: the CAPTCHA box has no label of its own (the privacy sentence above it is the nearest text), and the
+# form's last button says "Apply Now", greyed out until every required box has something in it.
+ONE_PAGE_FORM = """<form method="post" id="apply">
+<label for="fn">First Name *</label><input id="fn" name="first" required>
+<label for="mn">Middle Name</label><input id="mn" name="middle">
+<label for="ln">Last Name *</label><input id="ln" name="last" required>
+<label for="em">Email *</label><input id="em" name="email" type="email" required>
+<label for="sk">Skills</label><input id="sk" name="skills">
+<p>By applying, you hereby accept the data processing terms under the Privacy Policy and give consent to processing of
+the data as part of this job application.</p>
+<div><img id="imgCaptcha" src="/captcha.png" alt="Captcha" width="120" height="40"><input id="captcha" name="captcha" placeholder="Captcha" required></div>
+<button id="jobApplicationSubmitButton" disabled>Apply Now</button></form>
+<script>
+const form = document.getElementById("apply"), go = document.getElementById("jobApplicationSubmitButton");
+const check = () => { go.disabled = [...form.querySelectorAll("[required]")].some(i => !i.value.trim()); };
+form.addEventListener("input", check); check();
+</script>"""
+CAPTCHA_CODE = "K7Q2P"  # what job 6's picture "shows"
 
 
 def create_mock_ats():
@@ -196,6 +217,16 @@ def create_mock_ats():
                 return redirect("/apply/4/review")
             app.received.setdefault("hard_errors", []).append(missing)
         return _page("Additional Questions", HARD_FORM)
+
+    @app.route("/apply/6/form", methods=["GET", "POST"])
+    def one_page():
+        if request.method == "POST":
+            if request.form.get("captcha") == CAPTCHA_CODE and all(request.form.get(k) for k in ("first", "last", "email")):
+                app.received["one_page"] = dict(request.form)
+                return _page("AI Engineer", "<h2>Application Submitted!</h2><p>Thank you for submitting your application. "
+                                            "We will get back to you.</p>")
+            return _page("AI Engineer", '<p role="alert" class="error">Invalid captcha</p>' + ONE_PAGE_FORM)
+        return _page("AI Engineer", ONE_PAGE_FORM)
 
     @app.route("/apply/<int:n>/review", methods=["GET", "POST"])
     def review(n):

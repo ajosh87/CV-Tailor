@@ -613,3 +613,79 @@ def test_bot_detection_is_named_and_the_browser_doesnt_linger_there_unwatched(tm
         session.send({"action": "stop"})
         session.join(timeout=30)
         site.close()
+
+
+def test_the_button_that_sends_an_application_is_found_however_its_worded():
+    def page(buttons, filled=3):
+        fields = [_field(f"c{i}", f"Question {i}", filled=i < filled, value="x" if i < filled else "") for i in range(4)]
+        return {"fields": fields, "buttons": [{"id": f"b{n}", "text": t, "box": [0, 100 * n, 80, 30]} for n, t in enumerate(buttons)],
+                "text": "", "headings": []}
+
+    # Keka and many one-page forms end on "Apply Now": on a form with answers in it, that's the submit (yours to approve).
+    assert planner.navigation(page(["Apply Now"])) == ("ready_to_submit", "b0")
+    assert planner.navigation(page(["Send"])) == ("ready_to_submit", "b0")
+    # On a job posting (no answers yet), Apply only opens the application.
+    assert planner.navigation({"fields": [], "buttons": [{"id": "b0", "text": "Apply now", "box": [0, 0, 1, 1]}]}) == ("click", "b0")
+    # An Apply at the top that only scrolls to the form, a Submit at the bottom: Submit sends it.
+    assert planner.navigation(page(["Apply", "Submit application"])) == ("ready_to_submit", "b1")
+    # Two Apply buttons on a filled form: the one at its end.
+    assert planner.submit_button(page(["Apply now", "Apply now"]))["id"] == "b1"
+    # The model clicking "Apply Now" on a form with answers never sends it: you approve it.
+    filled = page(["Apply Now"])
+    plan = planner.parse_plan({"next": {"do": "click", "id": "b0"}}, filled, [])
+    assert (plan.next, plan.next_id) == ("ready_to_submit", "b0")
+    plan = planner.parse_plan({"next": {"do": "ready_to_submit", "id": "nope"}}, filled, [])
+    assert (plan.next, plan.next_id) == ("ready_to_submit", "b0")
+    assert planner.sends_application("Apply Now →") and not planner.sends_application("Save draft")
+    # A text CAPTCHA is yours to type: never filled, asked as an answer, sent to the LLM or kept.
+    captcha = _field("c9", "CAPTCHA (the characters in the picture)", required=True, captcha=True, secret=True)
+    assert planner.is_secret(captcha) and planner.ask_required(captcha)["kind"] == "secret"
+    assert "CAPTCHA" in planner.ask_required(captcha)["question"]
+
+
+@needs_browser
+def test_a_one_page_form_ending_in_apply_now_with_a_captcha_you_type(tmp_path):
+    from fixtures.mock_ats import CAPTCHA_CODE
+
+    site, store, application, session, model = _setup(tmp_path, "/apply/6/form")
+    try:
+        session.start()
+        asked = _wait(store, application.id, lambda a: a.waiting.get("kind") == "question", "the CAPTCHA")
+        questions = asked.waiting["questions"]
+        assert [(q["label"], q["kind"]) for q in questions] == [("CAPTCHA (the characters in the picture)", "secret")]
+        assert "Apply Now" in session.last_observation["greyed"]  # greyed out until the form is complete: not a way on
+        _click(session, "CAPTCHA")  # you type it in the view
+        session.send({"action": "input", "type": "type", "text": CAPTCHA_CODE})
+        session.send({"action": "answer", "answers": []})
+        ready = _wait(store, application.id, lambda a: a.waiting.get("kind") == "submit", "the submit approval")
+        assert ready.waiting["button"] == "Apply Now" and "one_page" not in site.app.received  # nothing sent without you
+        session.send({"action": "approve_submit"})
+        done = _wait(store, application.id, lambda a: a.status == "submitted", "the confirmation")
+        assert done.submitted_by == "assistant" and site.app.received["one_page"]["captcha"] == CAPTCHA_CODE
+    finally:
+        session.send({"action": "stop"})
+        session.join(timeout=30)
+        site.close()
+    # The CAPTCHA was never kept, sent to the LLM, or taken for the privacy sentence above it.
+    assert CAPTCHA_CODE not in json.dumps([done.answers, done.filled, app_details.load(store)])
+    assert not [p for p in model.prompts if CAPTCHA_CODE in p]
+    assert not [f for f in done.filled if "By applying" in f["label"]]
+
+
+@needs_browser
+def test_an_application_you_send_yourself_in_the_view_is_noticed(tmp_path):
+    from fixtures.mock_ats import CAPTCHA_CODE
+
+    site, store, application, session, model = _setup(tmp_path, "/apply/6/form")
+    try:
+        session.start()
+        _wait(store, application.id, lambda a: a.waiting.get("kind") == "question", "the CAPTCHA")
+        _click(session, "CAPTCHA")
+        session.send({"action": "input", "type": "type", "text": CAPTCHA_CODE})
+        session.send({"action": "input", "type": "key", "key": "Enter"})  # you send it with the site's own button
+        done = _wait(store, application.id, lambda a: a.status == "submitted", "the confirmation to be noticed", timeout=30)
+        assert done.submitted_by == "you" and site.app.received["one_page"]["captcha"] == CAPTCHA_CODE
+    finally:
+        session.send({"action": "stop"})
+        session.join(timeout=30)
+        site.close()

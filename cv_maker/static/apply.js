@@ -193,6 +193,7 @@
     } else {
       actions.appendChild(button('Resume', '', {action: 'resume'}));
       if (w.kind === 'check') actions.appendChild(button('It went through: mark as submitted', 'secondary', {action: 'mark_submitted'}));
+      else if (w.kind === 'stuck' || w.kind === 'paused') actions.appendChild(button('Sent it yourself? Mark as submitted', 'link-btn small', {action: 'mark_submitted'}));
     }
     needs.appendChild(actions);
   }

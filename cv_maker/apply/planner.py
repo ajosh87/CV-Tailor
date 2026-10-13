@@ -323,6 +323,10 @@ def ask_failed(f: dict, why: str = "", tried: str = "") -> dict:
 
 
 def ask_secret(f: dict) -> dict:
+    if f.get("captcha"):
+        return _question(f, "This is the site's CAPTCHA: type the characters from the picture into the page yourself in "
+                            "the view (the assistant never solves CAPTCHAs, and the app never keeps them), then answer "
+                            "the rest.", kind="secret")
     return _question(f, "This is for a password, code or ID number, which the assistant never types and the app never "
                         "keeps. Type it into the page yourself in the view, then answer the rest.", kind="secret")
 
@@ -523,12 +527,12 @@ def parse_plan(data: dict, page: dict, allowed: list[dict], check_text=lambda te
         button = buttons.get(target)
         if button is None:
             do = "wait"
-        elif SUBMIT.search(button["text"]):
-            do = "ready_to_submit"  # the final submit is always yours to approve
+        elif SUBMIT.search(button["text"]) or (sends_application(button["text"]) and _has_answers(page)):
+            do = "ready_to_submit"  # the final submit is always yours to approve: "Apply now" on a form with answers too
         elif ACCOUNT.search(button["text"]):
             do = "account"
-    if do == "ready_to_submit" and (target not in buttons or not SUBMIT.search(buttons[target]["text"])):
-        target = next((b["id"] for b in page.get("buttons", []) if SUBMIT.search(b["text"])), "")
+    if do == "ready_to_submit" and (target not in buttons or not is_submit(buttons[target], page)):
+        target = (submit_button(page) or {}).get("id", "")
         if not target:  # no Submit button on this page: it isn't the last one, whatever the model thinks
             found = navigation(page)
             do, target = ("click", found[1]) if found and found[0] == "click" else ("wait", "")
@@ -543,6 +547,38 @@ _START = re.compile(r"^(apply( now| online| here| today| for (this|the) (job|rol
                     r"apply for job|submit (your )?(cv|r[ée]sum[ée])|quick apply)$", re.I)
 
 
+# How the last button of a form can be worded when it doesn't say "Submit" (Keka and many one-page forms end on
+# "Apply Now").
+_FINAL = re.compile(r"^(send|send now|finish|finish (and|&) send|confirm (and|&) (send|apply))$", re.I)
+
+
+def sends_application(text: str) -> bool:
+    """Words a button that sends an application can use: Submit, Send application, Apply now, Send, Finish..."""
+    words = _button_text(text)
+    return bool(SUBMIT.search(text or "") or _START.match(words) or _FINAL.match(words))
+
+
+def _has_answers(page: dict) -> bool:
+    """The page holds an application form with answers in it (not a job posting with an Apply button)."""
+    return any(f.get("filled") and f.get("kind") not in ("file", "checkbox") for f in page.get("fields", []))
+
+
+def submit_button(page: dict) -> dict | None:
+    """The button that sends the application: one that says Submit (or "Send application"), or else, on a form with
+    answers in it, the "Apply now" / "Send" at its end. A page with both (an Apply at the top that only scrolls to the
+    form, a Submit at the bottom) sends with Submit."""
+    buttons = page.get("buttons", [])
+    said = next((b for b in buttons if SUBMIT.search(b["text"])), None)
+    if said or not _has_answers(page):
+        return said
+    worded = [b for b in buttons if sends_application(b["text"])]
+    return max(worded, key=lambda b: (b.get("box") or [0, 0])[1]) if worded else None  # the lowest: the form's end
+
+
+def is_submit(button: dict, page: dict) -> bool:
+    return bool(SUBMIT.search(button.get("text", ""))) or (submit_button(page) or {}).get("id") == button.get("id")
+
+
 def _button_text(text: str) -> str:
     """'Apply now →' -> 'Apply now': arrows, icons and stray punctuation around a button's words don't count."""
     return re.sub(r"^[^\w]+|[^\w)]+$", "", text or "").strip()
@@ -552,12 +588,12 @@ def navigation(info: dict) -> tuple[str, str] | None:
     """The obvious next click without asking the LLM: one Next/Continue, or Apply on a job posting.
     Returns ("click" | "ready_to_submit", element id), or None when it isn't obvious."""
     buttons = info["buttons"]
-    submit = [b for b in buttons if SUBMIT.search(b["text"])]
+    submit = submit_button(info)
     nexts = [b for b in buttons if _NEXT.match(_button_text(b["text"]))]
     if len(nexts) == 1:
         return ("click", nexts[0]["id"])
     if submit and not nexts:
-        return ("ready_to_submit", submit[0]["id"])
+        return ("ready_to_submit", submit["id"])
     starts = [b for b in buttons if _START.match(_button_text(b["text"]))]
     manual = [b for b in starts if "manual" in b["text"].casefold()]
     same = len({b["text"].strip().casefold() for b in starts}) == 1  # "Apply now" at the top and the bottom

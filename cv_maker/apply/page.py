@@ -118,6 +118,18 @@ OBSERVE_JS = r"""
   };
   const holderKeys = new Map();
   const secretOf = (el, label) => (el.getAttribute('type') || '').toLowerCase() === 'password' || SECRET.test(label);
+  // A text CAPTCHA (type the characters in the picture): yours to type, never the assistant's. Its box rarely has a
+  // label of its own, so the text nearby (often the privacy sentence above it) must not be taken for its question.
+  const CAPTCHA_WORD = /captcha/i;
+  const captchaOf = el => {
+    const own = [el.getAttribute('name'), el.id, el.getAttribute('placeholder'), el.getAttribute('aria-label'), el.getAttribute('autocomplete')].join(' ');
+    if (CAPTCHA_WORD.test(own)) return true;
+    for (let p = el.parentElement, i = 0; p && i < 3; p = p.parentElement, i++) {
+      if (p.querySelectorAll(FIELDS).length > 2) break;
+      if ([...p.querySelectorAll('img, canvas')].some(img => CAPTCHA_WORD.test([img.id, img.getAttribute('alt'), img.getAttribute('src'), String(img.className)].join(' ')))) return true;
+    }
+    return false;
+  };
 
   for (const el of deepAll(FIELDS)) {
     const tag = el.tagName.toLowerCase(), type = (el.getAttribute('type') || '').toLowerCase(), role = el.getAttribute('role') || '';
@@ -189,8 +201,9 @@ OBSERVE_JS = r"""
       if (type === 'date') f.format = 'YYYY-MM-DD';
       if (type === 'month') f.format = 'YYYY-MM';
       if (el.getAttribute('maxlength') && +el.getAttribute('maxlength') > 0) f.maxlength = +el.getAttribute('maxlength');
+      if (tag === 'input' && captchaOf(el)) { f.captcha = true; f.label = 'CAPTCHA (the characters in the picture)'; }
     }
-    f.secret = secretOf(el, label);
+    f.secret = secretOf(el, label) || !!f.captcha;
     f.name = (el.getAttribute('name') || el.id || '').slice(0, 60);
     if (!f.secret && f.filled) {
       const shown = tag === 'select' ? (el.multiple ? (f.selected || []).join('; ') : norm((el.options[el.selectedIndex] || {}).text))
@@ -211,9 +224,9 @@ OBSERVE_JS = r"""
   const KEY = /apply|next|continue|submit|review|sign ?in|log ?in|create|register|upload|attach|r[ée]sum[ée]|\bcv\b|autofill|start|proceed|save|account|manual|guest|accept|reject|decline|necessary|back|process|interview|glassdoor|indeed/i;
   const CLICKY = 'button, [role=button], input[type=submit], input[type=button], a[href], [onclick], label[for], [tabindex="0"], ' +
                  '[class*="btn" i], [class*="button" i], [data-automation-id*="button" i], [data-automation-id*="apply" i]';
-  const found = [];
+  const found = [], greyed = [];
   for (const el of deepAll(CLICKY)) {
-    if (!vis(el) || el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+    if (!vis(el)) continue;
     const host = el.closest('form, [role=search]');
     if ((host && notApplication.has(host)) || el.closest('[role=listbox]') || inChat(el)) continue;
     if (el.matches(FIELDS)) continue;  // a field, read above
@@ -221,6 +234,8 @@ OBSERVE_JS = r"""
     if (tag === 'LABEL') { const target = byId(el.htmlFor); if (!target || (target.type || '') !== 'file') continue; }  // an upload button
     const text = norm(el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('title'));
     if (!text || text.length > 60) continue;
+    // Greyed out (often a site's Apply button until its form is complete): never clicked, but worth saying.
+    if (el.disabled || el.getAttribute('aria-disabled') === 'true') { greyed.push({el, text}); continue; }
     const key = KEY.test(text);
     const real = tag === 'BUTTON' || tag === 'INPUT' || el.getAttribute('role') === 'button';
     if (!real && !key) continue;  // a link or a styled div only when it says what it does
@@ -229,7 +244,9 @@ OBSERVE_JS = r"""
     found.push({el, text, rank: key ? (chrome ? 1 : 0) : 2});
   }
   // A styled wrapper around a real button with the same words: keep the real button.
-  const keep = found.filter(c => !found.some(o => o !== c && c.el.contains(o.el) && o.text === c.text));
+  // A wrapper around a greyed-out button isn't a way on either.
+  const keep = found.filter(c => !found.some(o => o !== c && c.el.contains(o.el) && o.text === c.text)
+    && !greyed.some(g => c.el.contains(g.el) && g.text === c.text));
   keep.sort((a, b) => a.rank - b.rank);
   for (const c of keep.slice(0, 80)) {
     buttons.push({id: mark(c.el), text: c.text, box: box(c.el), href: c.el.tagName === 'A' ? c.el.href : ''});
@@ -266,6 +283,7 @@ OBSERVE_JS = r"""
       .some(e => vis(e) && !/size=invisible/.test(e.getAttribute('src') || '') && e.getAttribute('data-size') !== 'invisible' && !e.closest('.grecaptcha-badge') && e.getBoundingClientRect().height > 30),
     password_fields: [...document.querySelectorAll('input[type=password]')].filter(vis).length,
     fields, buttons,
+    greyed: [...new Set(greyed.map(g => g.text))].slice(0, 10),
     dialogs: dialogs.slice(0, 4).map(x => ({text: x.text, fields: x.fields, close_text: x.closeText,
                                             close_id: x.close ? (x.close.getAttribute('data-cvt') || mark(x.close)) : ''})),
     chat: deepAll(CHAT).filter(vis).length > 0,
@@ -396,8 +414,23 @@ def observe(page) -> dict:
             info["text"] = (info["text"] + " " + sub["text"])[:3000]
             info["errors"] += sub["errors"]
             info["password_fields"] += sub["password_fields"]
+            info["greyed"] = info.get("greyed", []) + sub.get("greyed", [])
             info["captcha"] = info["captcha"] or sub["captcha"]
     return info
+
+
+_GLANCE_JS = r"""() => ({
+  text: (document.body ? document.body.innerText : '').replace(/\s+/g, ' ').slice(0, 3000),
+  headings: [...document.querySelectorAll('h1, h2, h3')].map(h => h.innerText.trim()).filter(Boolean).slice(0, 8),
+  inputs: [...document.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]), select, textarea')]
+    .filter(e => e.offsetParent !== null).length,
+})"""
+
+
+def glance(page) -> dict:
+    """The page's words, headings and how many fields it shows, without marking anything: enough to notice a
+    confirmation while you're the one driving."""
+    return page.main_frame.evaluate(_GLANCE_JS)
 
 
 def _visible_challenge(frame) -> bool:

@@ -374,7 +374,12 @@ app. You can pause and take over (click and type in the view) at any time, then 
   (or a bigger local one on a GPU) is much faster than a small local model on a CPU.
 - **Buttons it finds:** real buttons and links, and the divs and labels sites style as buttons (an "Upload résumé"
   label, an "Apply now →" div), including inside web components. Apply, next, upload and sign-in buttons are read
-  first, so a long site menu never crowds them out. "Ready to submit" is only ever said on a page with a Submit button.
+  first, so a long site menu never crowds them out.
+- **The last button:** the one that sends the application says Submit (or *Send application*), or, on a form with
+  your answers in it, it's the *Apply now* or *Send* at the form's end (Keka and many one-page forms end that way).
+  Either way it waits for your approval. A greyed-out Apply button is never clicked: the assistant says the site
+  wants something more first. If you send the application yourself with the site's button in the view, the
+  assistant notices the site's confirmation and marks it submitted.
 - **Your answers stick:** each question is headed by the form's own words, with the site's help text, and
   the field is outlined in the view while you answer. Your answers are kept for the whole application, so a
   site that re-renders its form (Oracle, Workday) or a page you come back to is filled from them, not asked
@@ -389,7 +394,8 @@ app. You can pause and take over (click and type in the view) at any time, then 
 - **Passwords and ID numbers are yours to type:** fields for passwords, one-time codes, security answers,
   PINs and ID or bank numbers are never filled from an answer, sent to the LLM, saved or logged. The
   assistant asks you to type them in the view yourself. The only exception is your own sign-in, from your
-  system's password store.
+  system's password store. The same goes for a CAPTCHA's characters: its box is named as the CAPTCHA (never as
+  the text that happens to sit above it), and you type them in the view.
 - **Bot detection, and not lingering:** many application sites use bot detection (Google reCAPTCHA, hCaptcha,
   Cloudflare, Akamai, DataDome, HUMAN/PerimeterX, Imperva, Kasada, AWS WAF and others). Most of it checks every
   visitor in the background for as long as a page is open, whether or not it shows a challenge, and an assisted
