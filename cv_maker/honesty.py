@@ -73,6 +73,9 @@ _WORD = re.compile(r"[A-Za-z][\w&+#.'-]*")
 _COMMON_CAPITALS = {
     "I", "I'm", "I've", "I'd", "I'll", "Dear", "Mr", "Ms", "Mrs", "Dr", "Hiring", "Manager", "Team", "Kind",
     "Best", "Regards", "Sincerely", "Yours", "Thank", "Thanks", "CV",
+    # Salutations: "Dear Hiring Committee", "Dear Talent Acquisition Team", "To Whom It May Concern".
+    "Committee", "Panel", "Recruiter", "Recruiters", "Recruiting", "Recruitment", "Talent", "Acquisition", "Sir", "Madam",
+    "Whom", "It", "Concern",
     "January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
     "November", "December", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
 }
@@ -122,6 +125,38 @@ def _unsupported(sentence: str, words: set[str], numbers: set[str]) -> str:
     return ""
 
 
+# A CV speaks for the candidate, in an implied first person ("Data scientist who built…"). A sentence about the
+# candidate ("The candidate demonstrates…") or about the job and how well it matches ("This position requires…",
+# "keywords such as…") is the model's own note, not CV text: smaller models slip into it.
+_NOT_CV_VOICE = re.compile(
+    r"\b(the|this|our) (candidate|applicant|job ?seeker)\b|\b(candidate|applicant)['’]s\b|"
+    r"\bthis (role|position|job|posting|opening|vacancy)(?![-\w])|"
+    r"\bthe (job description|job posting|posting|vacancy|hiring manager)\b|"
+    r"\byour (posting|job|role|position|team|company|organi[sz]ation|opening|vacancy)\b|"
+    r"\b(role|position|job|posting|employer) (seeks|requires|requests|calls for|asks for|is looking for|needs|wants)\b|"
+    r"\bkeywords? (such as|like|including|from)\b|\bas evidenced by\b|\baligning with\b|"
+    r"\baligns? (well )?with (the|this|their)\b|\b(he|she) (has|is|demonstrates|brings|shows|possesses)\b|"
+    r"\b(his|her) (experience|background|skills|expertise)\b|^(his|her|their)\b|"
+    # A letter's voice: a CV's summary has no "I" or "my" ("Software Engineer I" is a title, so only "I am", "I have"...).
+    r"\b(my|me)\b|\bI(['’]m|['’]ve| am| have| was| bring)\b|"
+    r"\bis an? (proven|strong|ideal|excellent|great|perfect) (expert|fit|candidate|match)\b|"
+    r"\b(strong|ideal|good|great|perfect) (fit|match) for\b", re.I)
+# "a Master's or PhD": the posting's requirement copied, not a degree you hold.
+_COPIED_REQUIREMENT = re.compile(
+    r"\b(master['’]?s|bachelor['’]?s|ph\.? ?d\.?|mba)( degree)? or (an? )?(master['’]?s|bachelor['’]?s|ph\.? ?d|doctorate|"
+    r"equivalent)\b", re.I)
+
+
+def not_cv_voice(sentence: str) -> str:
+    """Why a CV sentence isn't written as the CV itself ("" when it is)."""
+    sentence = (sentence or "").strip()
+    m = _COPIED_REQUIREMENT.search(sentence)
+    if m:
+        return f"copies the posting's requirement (“{m.group(0)}”) instead of stating your own degree"
+    m = _NOT_CV_VOICE.search(sentence)
+    return (f"is a note about the candidate or the job (“{m.group(0)}”), not CV text in your own voice" if m else "")
+
+
 def _duration_pattern(months: int) -> str:
     """'2 yrs 5 mos', '2 years and 5 months', '2 years 5 months' for 29 months."""
     years, rest = divmod(months, 12)
@@ -149,18 +184,22 @@ def years_unsupported(sentence: str, roles: list[dict]) -> str:
 
 
 def filter_text(text: str, banned: list[str], check: FactCheck | None = None, where: str = "summary",
-                allowed_text: str | None = None, numbers_text: str | None = None, roles: list[dict] | None = None) -> str:
+                allowed_text: str | None = None, numbers_text: str | None = None, roles: list[dict] | None = None,
+                cv_voice: bool = False) -> str:
     """Drop every sentence that mentions a banned term or, given `allowed_text`, any name not in it, or a number
     not in `numbers_text` (default: `allowed_text`). Given `roles` (tenure.role_lines), a number of years must
-    name a role whose dates show that long."""
+    name a role whose dates show that long. With `cv_voice` (a CV's summary), every sentence must speak as the CV:
+    never about "the candidate", the job or its keywords."""
     words = _vocabulary(allowed_text) if allowed_text is not None else None
     numbers = _numbers(numbers_text if numbers_text is not None else allowed_text) if allowed_text is not None else None
     kept = []
     for sentence in _SENTENCE.split(plain_dashes(text).strip()):
         if not sentence:
             continue
-        hits = _offending(sentence, banned)
-        reason = f"mentions {', '.join(hits)}, which your profile does not confirm" if hits else ""
+        reason = not_cv_voice(sentence) if cv_voice else ""
+        hits = _offending(sentence, banned) if not reason else []
+        if hits:
+            reason = f"mentions {', '.join(hits)}, which your profile does not confirm"
         if not reason and roles is not None:
             reason = years_unsupported(sentence, roles)
         if not reason and words is not None:
@@ -366,7 +405,7 @@ def filter_cv_document(doc: CvDocument, allowed: Profile, banned_terms: list[str
     _drop_repeats(experiences, check)
 
     summary = filter_text(doc.summary, banned, check, "summary", allowed_facts_text(allowed, context_text),
-                          allowed_numbers_text(allowed), tenure.role_lines(allowed))
+                          allowed_numbers_text(allowed), tenure.role_lines(allowed), cv_voice=True)
     return CvDocument(
         name=allowed.name or doc.name,
         summary=_within_levels(summary, levels, check, "summary"),

@@ -27,6 +27,9 @@ For each rejected piece, think it through first and write that down briefly in "
 Then rewrite it using only those facts: spell tools as the profile does, replace an unsupported detail with a
 supported one or leave it out, and name a role with its duration as listed below instead of a total number of years.
 Keep it about as long as the original. If the point can't be made honestly from the profile, return "" for it.
+"thinking" is your private note; "text" is only the rewritten piece, written as the {where} itself speaks: for a CV,
+in an implied first person ("Data analyst who built..."), never about "the candidate", the job, the posting or its
+keywords.
 
 Job: {job}
 Time, counted from the candidate's dates: {tenure}

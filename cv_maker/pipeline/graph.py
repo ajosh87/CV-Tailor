@@ -264,11 +264,13 @@ Candidate profile (the only allowed facts; anything not chosen above stays off t
 {profile}
 
 Before writing each bullet, check: which need does it prove, which posting keyword honestly fits it, and what is the
-result? Then write it so the reader sees that first.
+result? Then write it so the reader sees that first. That checking is for you: none of it goes into the CV, which only
+ever speaks as the candidate's own CV. Right: "Machine learning engineer who builds retrieval-augmented tools...".
+Wrong: "The candidate demonstrates...", "This role requires...", "...supported by keywords such as...".
 
 Return one JSON object:
 {{
-  "summary": "3 sentences grounded strictly in the profile: open with the target role ({job_title}) or the candidate's closest real title, then the strongest evidence for the job's top needs, using 3-5 of the keywords above in the posting's wording. Nothing about work this job doesn't need.",
+  "summary": "the CV's own summary, 2-3 sentences grounded strictly in the profile and written as the CV itself, in an implied first person: open with the candidate's real professional title (the posting's title, {job_title}, only if it truly describes them), then their strongest evidence for the job's top needs, using 3-5 of the keywords above where the profile shows them. Never write about 'the candidate', 'he' or 'she', never mention the job, the role or position being applied for, the posting, keywords or how well anything matches, and nothing about work this job doesn't need.",
   "experiences": [{{"id": "R1", "bullets": [{{"id": "R1.B2", "text": "the rewritten bullet: a strong action verb, the result first where there is one, every number unchanged, the posting's wording for a skill when the fact is the same"}}]}}],
   "skills": ["every profile skill that this job or this kind of work uses, written as the posting writes them when it is the same skill, most relevant first; never a requirement phrase or a quality such as 'ownership'"]
 }}

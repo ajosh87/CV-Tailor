@@ -237,3 +237,58 @@ def test_interview_prep_says_what_to_say_and_only_what_your_profile_shows():
     assert q["answer"] == "At Northwind I built a RAG chatbot with Azure AI Search." and q["key_points"] == ["Azure AI Search"]
     assert q["follow_up_answer"] and notes["brush_up"][0]["review"] == "chunking, reranking"
     assert len(notes["fact_check"]) == 3
+
+
+def test_a_summary_speaks_as_your_cv_never_about_the_candidate_or_the_job():
+    doc = CvDocument("", "The candidate demonstrates proficiency in building RAG chatbots, as evidenced by their work at "
+                         "Northwind. This position requires skills directly supported by keywords such as 'Python'. "
+                         "Research Analyst who evaluated ML datasets and built RAG chatbots with Python.", [], [], ["Python"])
+    check = FactCheck()
+    out = filter_cv_document(doc, _profile(), [], check, "Platform Engineer. Python and RAG.")
+    assert out.summary == "Research Analyst who evaluated ML datasets and built RAG chatbots with Python."
+    reasons = [i["reason"] for i in check.items if i["where"] == "summary"]
+    assert len(reasons) == 2 and all("not CV text in your own voice" in r for r in reasons)
+    # The model's notes about the job are caught however they're put; ordinary CV words aren't.
+    from cv_maker.honesty import not_cv_voice
+    for note in ("Data Platform Engineer role seeks expertise in deep learning, aligning with the candidate's background.",
+                 "This role is a strong match for the applicant.", "She brings deep expertise in NLP.",
+                 "His experience covers Python and SQL.",
+                 "Your posting also prioritizes rigorous evaluation, which matches my tenure as Research Analyst.",
+                 "Their cross-functional collaboration skills further support decision-making.",
+                 "I have also contributed to RAG solutions while collaborating with teams.",
+                 "A proven expert in RAG who is a strong fit for the team."):
+        assert not_cv_voice(note), note
+    assert "copies the posting's requirement" in not_cv_voice("Platform Engineer with a Master’s or PhD in Computer Science.")
+    for fine in ("Data engineer who designed role-based access control and keyword search for internal tools.",
+                 "Analyst who matched job descriptions to candidates for a recruiting team.",
+                 "Built the job scheduler and position tracking for the fleet.",
+                 "Software Engineer I, Payments Platform with hands-on experience in RAG.",
+                 "Data Analyst with a Master's in Statistics and an MBA.",
+                 "Built dashboards that helped teams track their experiments."):
+        assert not not_cv_voice(fine), fine
+
+
+def test_a_letters_salutation_is_never_taken_for_an_invented_name():
+    from cv_maker.honesty import allowed_facts_text, filter_text
+
+    check = FactCheck()
+    for line in ("Dear Hiring Committee,", "Dear Talent Acquisition Team,", "To Whom It May Concern,"):
+        assert filter_text(line, [], check, "letter", allowed_facts_text(_profile())) == line
+    assert check.items == []
+
+
+def test_a_link_a_pdf_wrapped_onto_the_next_line_is_read_whole():
+    from cv_maker.privacy import mask
+    from cv_maker.profile.extract_text import join_wrapped_links
+
+    # LinkedIn's own profile PDF breaks a long address after a hyphen.
+    text = "ada@example.com\n\nwww.linkedin.com/in/ada-\nlovelace-12ab34 (LinkedIn)\n\nTop Skills"
+    joined = join_wrapped_links(text)
+    assert "www.linkedin.com/in/ada-lovelace-12ab34 (LinkedIn)" in joined
+    _, mapping = mask(joined)
+    assert "www.linkedin.com/in/ada-lovelace-12ab34" in mapping.values()
+    assert join_wrapped_links("https://github.com/ada_\nlovelace") == "https://github.com/ada_lovelace"
+    assert join_wrapped_links("linkedin.com/in/\nada-lovelace") == "linkedin.com/in/ada-lovelace"
+    for untouched in ("Built a self-\nservice portal", "See www.acme.com/\nExperience", "ada@example.com\nLondon",
+                      "acme.com -\nthen"):
+        assert join_wrapped_links(untouched) == untouched, untouched

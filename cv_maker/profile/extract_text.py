@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from docx import Document
@@ -13,6 +14,18 @@ _TXBX = qn("w:txbxContent")
 _SDT_CONTENT, _CUSTOM_XML = qn("w:sdtContent"), qn("w:customXml")
 _WRAPPERS = {qn("w:sdt"), _CUSTOM_XML}
 _MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+
+
+# A long web address wraps onto the next line in a PDF. LinkedIn's own profile PDF breaks it after a hyphen
+# ("www.linkedin.com/in/ada-" / "lovelace-12ab34 (LinkedIn)"), so a link read from the text was cut short. It's joined
+# back when an address stops at the end of a line on a hyphen, an underscore or a profile path ("/in/").
+_WRAPPED_LINK = re.compile(
+    r"((?:https?://|www\.|\b(?:[\w-]+\.)+(?:com|net|org|io|dev|me|in|co|ai|app)(?=/))[^\s<>\"'|]*"
+    r"(?:[-_]|/(?:in|pub|company|u|user|users)/))[ \t]*\r?\n[ \t]*(?=[\w%])")
+
+
+def join_wrapped_links(text: str) -> str:
+    return _WRAPPED_LINK.sub(r"\1", text)
 
 
 class UnreadableCvError(Exception):
@@ -99,4 +112,4 @@ def extract_text(path: Path) -> str:
         raise UnreadableCvError(str(exc)) from exc
     if not text.strip():
         raise UnreadableCvError("empty CV text")
-    return text
+    return join_wrapped_links(text)

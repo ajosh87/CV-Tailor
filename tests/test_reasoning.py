@@ -263,3 +263,13 @@ def test_after_a_profile_edit_the_job_offers_a_new_version_from_it(tmp_path):
     assert "with your changes" not in client.get(f"/runs/{run.id}").data.decode()
     client.post("/profile/rewrite")
     assert len([d for d in app.store.list_documents(run.id) if d.kind == "cv"]) == 2  # nothing left to rewrite
+
+
+def test_the_writing_and_revising_prompts_keep_the_cv_in_its_own_voice():
+    from cv_maker import revise
+    from cv_maker.pipeline import graph
+
+    assert "never write about 'the candidate'" in graph._REWRITE_PROMPT.lower()
+    assert "Wrong: \"The candidate demonstrates" in graph._REWRITE_PROMPT
+    assert "open with the target role" not in graph._REWRITE_PROMPT  # it read as "<title> role seeks..."
+    assert "never about \"the candidate\", the job, the posting" in revise._PROMPT
