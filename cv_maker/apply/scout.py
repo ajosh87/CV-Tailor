@@ -83,7 +83,7 @@ def look(url: str, details: dict, *, throttle=sites, max_pages: int = MAX_PAGES)
 
     found = {"checked_at": datetime.now(timezone.utc).isoformat(), "start_url": url, "sites": [], "pages": [],
              "account": None, "captcha": False, "documents": [], "questions": [], "consent": [], "diversity": False,
-             "stopped_at": "", "links": [], "ended_on": ""}
+             "stopped_at": "", "links": [], "ended_on": "", "guards": {}}
     with LOOK_LOCK, tempfile.TemporaryDirectory() as profile, sync_playwright() as pw:
         context = pw.chromium.launch_persistent_context(profile, headless=True, viewport={"width": 1280, "height": 860},
                                                         accept_downloads=False)
@@ -109,6 +109,9 @@ def look(url: str, details: dict, *, throttle=sites, max_pages: int = MAX_PAGES)
                     info = pg.observe(page)
                 found["pages"].append({"site": site, "title": info.get("title") or "", "headings": info.get("headings", [])[:3]})
                 _collect_links(found, info)
+                for guard in pg.bot_checks(page):
+                    if guard not in found["guards"].setdefault(site, []):
+                        found["guards"][site].append(guard)
                 block = planner.blocker(info)
                 if block == "account":
                     found["account"] = _account(info, site)
@@ -182,6 +185,9 @@ def summary(found: dict) -> list[str]:
         lines.append(f"needs an account on {found['account']['site']}" + (f" ({', '.join(options)})" if options else ""))
     if found.get("captcha"):
         lines.append("has a CAPTCHA")
+    for site, guards in (found.get("guards") or {}).items():
+        if guards:
+            lines.append(f"{site} uses bot detection ({', '.join(guards)})")
     if found.get("documents"):
         lines.append("asks for " + ", ".join(d["what"] + (" (required)" if d["required"] else "") for d in found["documents"]))
     unsaved = [q["label"] for q in found.get("questions", []) if not q["saved"]]

@@ -1,7 +1,8 @@
 """A small job site that behaves like the application systems the assistant meets (Workday and others).
 
 Job 1: posting -> sign in / create account -> my information -> experience (uploads) -> questions ->
-voluntary disclosures -> review -> thank you. Job 2 starts with a CAPTCHA-style check.
+voluntary disclosures -> review -> thank you. Job 2 starts with a CAPTCHA-style check; job 5's sign-in page has
+invisible bot detection (what reCAPTCHA and Cloudflare's script leave on a page, without contacting either).
 Test-only: it runs on localhost and accepts any account.
 """
 import threading
@@ -95,10 +96,16 @@ def create_mock_ats():
             if request.form.get("email") and request.form.get("password"):
                 session["user"] = request.form["email"]
                 return redirect(f"/apply/{n}/info")
-        return _page("Sign in", '<form method="post"><label for="e">Email address</label><input id="e" name="email" type="email">'
+        guards = ('<script>window.grecaptcha = {ready: function () {}};</script>'
+                  '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>') if n == 5 else ""
+        return _page("Sign in", guards + '<form method="post"><label for="e">Email address</label><input id="e" name="email" type="email">'
                                 '<label for="p">Password</label><input id="p" name="password" type="password">'
                                 '<button>Sign In</button></form>'
                                 f'<p>New here? <a href="/apply/{n}/create">Create Account</a></p>')
+
+    @app.route("/cdn-cgi/challenge-platform/scripts/jsd/main.js")
+    def challenge_script():
+        return app.response_class("", mimetype="text/javascript")
 
     @app.route("/apply/<int:n>/create", methods=["GET", "POST"])
     def create(n):

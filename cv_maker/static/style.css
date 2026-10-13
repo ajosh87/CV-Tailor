@@ -1001,3 +1001,9 @@ ul.attention li { padding: 6px 10px; border-left: 3px solid var(--warn); backgro
   border-radius: 0 6px 6px 0; cursor: default; }
 ul.attention li[tabindex="0"] { cursor: pointer; }
 ul.attention li:hover, ul.attention li:focus { background: color-mix(in srgb, var(--warn) 13%, transparent); outline: none; }
+
+/* ---- bot detection on the application's sites ---- */
+.guard-note { margin: 6px 0; padding: 8px 10px; border-left: 3px solid var(--warn); border-radius: 0 6px 6px 0;
+  background: color-mix(in srgb, var(--warn) 8%, transparent); font-size: 0.86rem; }
+.guard-note p { margin: 0; }
+.guard-note p + p { margin-top: 4px; }

@@ -7,6 +7,7 @@
   var api = '/api/applications/' + id;
   var $ = function (sel) { return document.getElementById(sel); };
   var live = $('ap-live'), img = $('ap-frame'), target = $('ap-target'), badge = $('ap-badge'), needs = $('ap-needs');
+  var guardNote = $('ap-guards'), guardKey = '';
   var state = {}, frameSeq = -2, needsKey = '', filledCount = -1, timer = null, hoverBox = null;
 
 
@@ -125,13 +126,18 @@
     if (key === needsKey) return;
     needsKey = key;
     needs.textContent = '';
-    if (!w || !w.kind) {
+    var closed = !state.live && w && w.kind === 'closed';  // it closed its browser while waiting for you
+    if (!w || !w.kind || closed) {
       if (state.status === 'submitted') {
         needs.appendChild(el('p', {class: 'ok-text'}, '✓ Application submitted' + (state.submitted_by === 'you' ? ' (marked by you).' : '.')));
         var back = el('a', {href: root.dataset.job, class: 'btn secondary mt-md'}, 'Back to the job');
         needs.appendChild(back);
       } else if (!state.live && (state.status === 'stopped' || state.status === 'failed')) {
         if (state.error) needs.appendChild(el('p', {class: 'error-text', role: 'alert'}, state.error));
+        if (closed) {
+          needs.appendChild(el('p', {}, w.text));
+          if (w.was) needs.appendChild(el('p', {class: 'small muted mt-xs'}, 'It was waiting for you: ' + w.was));
+        }
         needs.appendChild(el('p', {class: 'small muted mt-xs'}, 'Resume to pick up from the last page. If you already finished it yourself, mark it as submitted.'));
         var row = el('div', {class: 'row mt-md'});
         row.appendChild(button('Mark as submitted', 'secondary', {action: 'mark_submitted'}));
@@ -327,6 +333,30 @@
     });
   }
 
+  // ---- bot detection on this application's sites (reCAPTCHA and the like) ----
+
+  function renderGuards(guards) {
+    var sites = Object.keys(guards || {}).filter(function (s) { return guards[s] && guards[s].length; });
+    var key = JSON.stringify(guards || {});
+    if (key === guardKey) return;
+    guardKey = key;
+    guardNote.textContent = '';
+    guardNote.hidden = !sites.length;
+    if (!sites.length) return;
+    sites.forEach(function (s) {
+      var line = el('p', {class: 'guard-site'});
+      line.appendChild(el('strong', {}, s));
+      var names = guards[s];
+      line.appendChild(document.createTextNode(' uses ' + (names.length > 1
+        ? names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1] : names[0])));
+      guardNote.appendChild(line);
+    });
+    guardNote.appendChild(el('p', {class: 'small muted'}, 'Bot detection checks every visitor in the background, this assisted ' +
+      'browser included, for as long as the page is open. Left there for long, it can flag your internet connection, and ' +
+      'then your own browser meets challenges too. So while the assistant waits for you there, its browser closes after ' +
+      root.dataset.closeGuarded + ' minutes unless this page is on screen. Finishing in your own browser avoids it.'));
+  }
+
   // ---- progress: opening → filling in → your review → submitted ----
 
   var STEPS = ['Opening the application', 'Filling in', 'Your review', 'Submitted'];
@@ -382,17 +412,20 @@
     if (s.frame >= 0 || s.status !== 'starting') refreshFrame(s.frame);
     drawTarget(s.mode === 'agent' ? s.target : hoverBox);
     renderNeeds(s.waiting);
+    renderGuards(s.guards);
     renderFilled(s.filled || []);
     renderSteps(s);
   }
   function poll() {
     clearTimeout(timer);
-    fetch(api, {headers: {'X-Requested-With': 'XMLHttpRequest'}})
+    // "seen" only while this page is on screen: the assistant's browser stays open for as long as you're looking.
+    fetch(api + (document.hidden ? '' : '?seen=1'), {headers: {'X-Requested-With': 'XMLHttpRequest'}})
       .then(function (r) { return r.json(); })
       .then(function (data) { state = data; render(); })
       .catch(function () { badge.textContent = 'Reconnecting…'; badge.hidden = false; })
-      .finally(function () { timer = setTimeout(poll, state.live ? 600 : 3000); });
+      .finally(function () { timer = setTimeout(poll, !state.live ? 3000 : document.hidden ? 5000 : 600); });
   }
+  document.addEventListener('visibilitychange', function () { if (!document.hidden) poll(); });
   window.addEventListener('resize', function () { drawTarget(state.mode === 'agent' ? state.target : hoverBox); });
   poll();
 })();

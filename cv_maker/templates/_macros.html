@@ -39,8 +39,9 @@
   <ul class="needs-list">
     {% if scan.sites|length > 1 %}<li>Runs on {{ scan.sites|join(' → ') }}</li>{% elif scan.sites %}<li>Runs on {{ scan.sites[0] }}</li>{% endif %}
     {% if scan.account %}<li class="attn">Needs {{ 'a new account' if scan.account.creating else 'you to sign in' }} on {{ scan.account.site }}{% if scan.account.options %} ({{ scan.account.options|join(', ') }}){% endif %}.
-      {% if saved_sites and scan.account.site in saved_sites %}You have a saved account there: the assistant can sign you in.{% else %}You do this in the assistant's live view (or <a href="{{ url_for('apply_details_page', next=request.path) }}#accounts">save the account</a> so the assistant can). Google sign-in usually refuses automated browsers, so email is the safer choice.{% endif %}</li>{% endif %}
+      {% if saved_sites and scan.account.site in saved_sites %}You have a saved account there: the assistant can sign you in.{% else %}You do this in the assistant's live view (or <a href="{{ url_for('apply_details_page', next=request.path) }}#accounts">save the account</a> so the assistant can). Google sign-in usually refuses assisted browsers, so email is the safer choice.{% endif %}</li>{% endif %}
     {% if scan.captcha %}<li class="attn">Shows a CAPTCHA, which you solve in the live view.</li>{% endif %}
+    {% for site, guards in (scan.guards or {}).items() if guards %}<li class="attn">{{ site }} uses {{ (guards[:-1]|join(', ') ~ ' and ' ~ guards[-1]) if guards|length > 1 else guards[0] }}: bot detection that checks every visitor in the background, the assisted browser included, so the assistant keeps its time there short. Applying in your own browser avoids it.</li>{% endfor %}
     {% for d in scan.documents %}
       <li>Asks for {{ d.what|lower if d.what in ('CV', 'Cover letter') else d.what }}{{ ' (required)' if d.required }}{% if d.what == 'Cover letter' and d.required and not has_letter %}: none written yet, so tick “Also write a cover letter” (applying alongside adds one automatically){% endif %}</li>
     {% endfor %}

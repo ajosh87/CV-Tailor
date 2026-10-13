@@ -18,6 +18,7 @@
   <p class="small muted mb-md" id="ap-step-detail" aria-live="polite"></p>
 
   <div id="ap" data-id="{{ application.id }}" data-width="{{ viewport.width }}" data-height="{{ viewport.height }}"
+       data-close-guarded="{{ close_after.guarded }}"
        data-job="{{ url_for('run_detail', run_id=run.id) if run else url_for('jobs') }}">
     <div class="panel needs" id="ap-needs" hidden role="region" aria-live="polite"></div>
 
@@ -43,6 +44,7 @@
       <button type="button" class="ghost sm" id="ap-stop" hidden data-confirm="Stop the assistant? You can resume later from the last page.">Stop</button>
     </span>
   </div>
+  <div class="guard-note" id="ap-guards" role="note" hidden></div>
   <div class="browser-bar">
     <button type="button" class="nav-btn" data-nav="back" title="Back" aria-label="Back">
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
@@ -67,7 +69,9 @@
     <button type="button" class="ghost sm" data-key="Tab">Tab</button>
     <button type="button" class="ghost sm" data-key="Enter">Enter</button>
   </div>
-  <p class="small faint mt-sm" id="ap-help">The assistant drives; press <strong>Take over</strong> any time to use the page yourself: click, scroll and type straight into the view, or use Back, Reload and the address bar. It notices when you're past LinkedIn's Apply, a sign-in or a CAPTCHA and carries on by itself.</p>
+  <p class="small faint mt-sm" id="ap-help">The assistant drives; press <strong>Take over</strong> any time to use the page yourself: click, scroll and type straight into the view, or use Back, Reload and the address bar. It notices when you're past LinkedIn's Apply, a sign-in or a CAPTCHA and carries on by itself.
+    While it waits for you with this page out of sight, the assisted browser closes after {{ close_after.idle }} minutes
+    ({{ close_after.guarded }} on a site with bot detection) rather than sit on the site; Resume reopens the page.</p>
 </div>
 {% endblock %}
 {% block scripts %}<script src="{{ url_for('static', filename='apply.js') }}"></script>{% endblock %}

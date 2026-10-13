@@ -17,6 +17,7 @@ from cv_maker import skills as sk
 from cv_maker.apply import accounts as apply_accounts
 from cv_maker.apply import details as app_details
 from cv_maker.apply import scout
+from cv_maker.apply import session as apply_session
 from cv_maker.apply.session import VIEWPORT, ApplySession, Sessions
 from cv_maker.llm.limits import Governor, GovernedModel
 from cv_maker.events import feed
@@ -213,6 +214,7 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
                   scanner=scanner, on_generate=lambda run, version: start_alongside(run, version), researcher=researcher)
     app.tasks = tasks
     sessions = Sessions()  # the apply assistant's browsers (one at a time)
+    app.sessions = sessions
     app.apply_sessions = sessions
     browser_dir = data_dir / "browser"  # the assistant's own browser profile: cookies and sign-ins for job sites
 
@@ -1238,7 +1240,8 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
         if application is None:
             abort(404)
         return render_template("apply.html", application=application, run=store.find_run(application.run_id),
-                               viewport=VIEWPORT)
+                               viewport=VIEWPORT, close_after={"idle": apply_session.IDLE_CLOSE // 60,
+                                                              "guarded": apply_session.GUARDED_CLOSE // 60})
 
     @app.route("/api/applications/<app_id>")
     def api_application(app_id: str):
@@ -1246,8 +1249,11 @@ def create_app(data_dir: Path | None = None, *, model_factory=None, fetcher=None
         if application is None:
             abort(404)
         session = sessions.get(app_id)
+        if session is not None and request.args.get("seen") == "1":
+            session.seen()  # the live view is on screen: the browser stays open while it waits for you
         return jsonify({
             "status": application.status, "waiting": application.waiting, "url": application.current_url,
+            "guards": application.guards,
             "error": application.error, "submitted_at": application.submitted_at, "submitted_by": application.submitted_by,
             "live": bool(session and session.is_alive()), "mode": session.mode if session else "",
             "frame": session.frame_seq if session else -1, "target": session.target if session else None,

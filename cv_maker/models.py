@@ -129,6 +129,8 @@ class Application:
     # Your answers during this application, by the form's question: reused when a page is read again (sites that
     # re-render their forms give fields new ids), and on a resume. Never a password, code or ID number.
     answers: dict = field(default_factory=dict)
+    # The bot detection found on each site of this application (Google reCAPTCHA, Cloudflare, Akamai...), by site.
+    guards: dict = field(default_factory=dict)
 
 
 @dataclass

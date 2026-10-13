@@ -320,7 +320,7 @@ your computer gets throttled or blocked as a bot.
   | Assistant: pause after each page | 2.5 s | 1.2 s | 0.6 s |
 
 - **No disguises:** the app names itself in its User-Agent, follows robots.txt when researching, never
-  solves CAPTCHAs, and doesn't hide that it's automated. If a site blocks it anyway, it stops and tells
+  solves CAPTCHAs, and doesn't disguise its assisted browser. If a site blocks it anyway, it stops and tells
   you instead of working around the block.
 
 ## Apply assistant (optional)
@@ -390,6 +390,15 @@ app. You can pause and take over (click and type in the view) at any time, then 
   PINs and ID or bank numbers are never filled from an answer, sent to the LLM, saved or logged. The
   assistant asks you to type them in the view yourself. The only exception is your own sign-in, from your
   system's password store.
+- **Bot detection, and not lingering:** many application sites use bot detection (Google reCAPTCHA, hCaptcha,
+  Cloudflare, Akamai, DataDome, HUMAN/PerimeterX, Imperva, Kasada, AWS WAF and others). Most of it checks every
+  visitor in the background for as long as a page is open, whether or not it shows a challenge, and an assisted
+  browser left on such a page for hours can get your internet connection flagged, so that your own browser meets
+  CAPTCHAs too. The assistant notices it from the scripts, frames and cookies a page loads (never working around
+  it): the check before applying lists it, the log says which service a site uses, and the application page shows
+  it above the live view. While the assistant waits for you and the application page isn't on screen, its browser
+  closes after 10 minutes, or 3 on a site with bot detection. Everything so far is kept (what you typed in the view
+  too) and **Resume from the last page** reopens it. On such a site, finishing in your own browser avoids it.
 - **The live browser:** the right half of the application page. **Take over** whenever you like and use
   it as a browser: click, scroll and type in it, or use Back, Forward, Reload and the address bar (using
   them takes over too). **Let the assistant continue** hands it back.
@@ -405,7 +414,7 @@ app. You can pause and take over (click and type in the view) at any time, then 
   - Answer diversity questions: it picks "prefer not to say" when offered, otherwise asks you.
   - Tick job-alert boxes, accept cookies (it takes "reject" when offered), or act on LinkedIn, which
     forbids automated applications.
-  - Use tricks to hide that it's automated.
+  - Use tricks to disguise its assisted browser.
 - **Accounts:** it can fill in a sign-up form with a generated password, saved to your system's password
   store (Windows Credential Manager under *Windows Credentials → Generic Credentials*, entries named
   "CV Tailor"; macOS Keychain; the Secret Service on Linux) through `keyring`, never to the app's files,

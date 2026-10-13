@@ -35,6 +35,13 @@ EMPTY_READS = 4  # a page with nothing on it yet (single-page sites render late)
 HIDDEN = "•••••• (typed by you, never kept)"
 PAUSED = "You're in control: use the view like a normal browser. Press Resume when the assistant should carry on."
 # Human pace: a short pause after each field and after each page (the politeness level in Settings sets them).
+# While it waits for you and the live view isn't on screen, the assisted browser closes after this long rather than sit
+# on the site (your progress is kept; Resume reopens the page). Sooner where there's bot detection (reCAPTCHA and the
+# like): it keeps checking the visitor for as long as the page is open, and can end up flagging your internet
+# connection, so you'd meet challenges in your own browser too.
+IDLE_CLOSE = 10 * 60
+GUARDED_CLOSE = 3 * 60
+GUARD_LOOK = 10.0  # seconds between looks for bot detection while you're driving
 
 
 class SetupError(Exception):
@@ -79,10 +86,20 @@ class ApplySession(threading.Thread):
         self._last_watch = 0.0
         self._answers: dict[str, str] = dict(application.answers or {})  # your answers here, by the form's question
         self._not_kept: dict[str, dict] = {}  # question -> {"why", "tried", "options"}: what a site wouldn't keep
+        self._guards: dict[str, list] = {k: list(v) for k, v in (application.guards or {}).items()}  # site -> bot detection
+        self._guard_look = (0.0, "")  # (when, where) the page was last looked at for bot detection
+        self._waiting_since = 0.0
+        self._seen_at = 0.0  # when you last had the live view on screen, or sent a command
+        self._closed: dict = {}  # why the browser closed while waiting for you, shown once it has
 
     # ---- talking to the web app (any thread) ----
 
+    def seen(self) -> None:
+        """The live view is on screen: you may be about to act, so the browser stays open."""
+        self._seen_at = time.monotonic()
+
     def send(self, command: dict) -> None:
+        self.seen()
         action = command.get("action")
         if action == "pause":
             self.pause_requested.set()
@@ -106,6 +123,7 @@ class ApplySession(threading.Thread):
 
     def _wait_for_you(self, kind: str, text: str, **extra) -> None:
         self.mode = "paused"
+        self._waiting_since = time.monotonic()
         self.pause_requested.clear()
         url = self.page.url if self.page is not None else ""
         self._save(status="needs_you", waiting={"kind": kind, "text": text, "url": url, **extra})
@@ -141,6 +159,54 @@ class ApplySession(threading.Thread):
                 if not planner.blocker(info) and (moved or not info.get("captcha")):
                     feed.emit("apply", "looks like you're through: carrying on")
                     return self._carry_on()
+
+    # ---- bot detection, and not lingering where it is ----
+
+    def _check_guards(self, force: bool = False) -> None:
+        """Notice bot detection on the page (reCAPTCHA and the like) and tell you, once per site and kind."""
+        if self.page is None or not _web(self.page.url):
+            return
+        now, url = time.monotonic(), self.page.url
+        if not force and url == self._guard_look[1] and now - self._guard_look[0] < GUARD_LOOK:
+            return
+        self._guard_look = (now, url)
+        site = planner.site_of(url)
+        new = [g for g in pg.bot_checks(self.page) if g not in self._guards.get(site, [])]
+        if not new:
+            return
+        self._guards[site] = self._guards.get(site, []) + new
+        self._save(guards={k: list(v) for k, v in self._guards.items()})
+        feed.emit("warn", f"! {site} uses {_listed(new)}: bot detection that checks every visitor in the background, "
+                          f"this assisted browser included. While the assistant waits for you there, its browser closes "
+                          f"after {GUARDED_CLOSE // 60} minutes unless you have the live view open")
+
+    def _close_after(self) -> float:
+        site = planner.site_of(self.page.url) if self.page is not None and _web(self.page.url) else ""
+        return GUARDED_CLOSE if self._guards.get(site) else IDLE_CLOSE
+
+    def _idle(self) -> bool:
+        """Waiting for you, and you haven't looked for a while."""
+        return self.mode == "paused" and time.monotonic() - max(self._waiting_since, self._seen_at) > self._close_after()
+
+    def _close_while_waiting(self) -> None:
+        """Close the browser rather than leave it on the site. What you typed in the view is noted first, and Resume
+        reopens the last page."""
+        try:
+            self._note_what_you_typed()
+        except Exception:
+            pass  # the page is mid-navigation: what was filled by the assistant is kept anyway
+        site = planner.site_of(self.page.url) if _web(self.page.url) else ""
+        guards = self._guards.get(site) or []
+        minutes = max(1, round(self._close_after() / 60))
+        text = (f"The assisted browser closed after {minutes} minute{'s' if minutes != 1 else ''} of waiting for you, so it "
+                f"doesn't sit on {site or 'the site'}"
+                + (f", which uses {_listed(guards)}: bot detection that keeps checking visitors for as long as a page is "
+                   "open." if guards else ".")
+                + " Everything so far is kept: Resume reopens the last page.")
+        application = self.store.get_application(self.app_id)
+        self._closed = {"kind": "closed", "text": text,
+                        "was": ((application.waiting or {}).get("text", "") if application else "")}
+        feed.emit("user", f"■ {text}")
 
     def _attention(self, info: dict) -> list[dict]:
         """What on this page needs you, field by field: [{"label", "why", "box"}], most urgent first."""
@@ -302,8 +368,12 @@ class ApplySession(threading.Thread):
                     elif self.mode == "paused":
                         try:
                             self._watch()
+                            self._check_guards()
                         except Exception:
                             pass  # the page is mid-navigation; the next look will do
+                        if self._idle():
+                            self._close_while_waiting()
+                            break
                     self._snap()
                     self.page.wait_for_timeout({"paused": 120, "documents": 1000}.get(self.mode, 40))
                 self._snap(force=True)
@@ -311,8 +381,9 @@ class ApplySession(threading.Thread):
                 context.close()
         application = self.store.get_application(self.app_id)
         if application is not None and application.status not in ("submitted", "failed"):
-            self._save(status="stopped", waiting={})
-            feed.emit("user", "■ stopped; resume any time from the job's page")
+            self._save(status="stopped", waiting=self._closed)
+            if not self._closed:
+                feed.emit("user", "■ stopped; resume any time from the job's page")
 
     def _follow_new_tab(self, new_page) -> None:
         self.page = new_page
@@ -504,6 +575,7 @@ class ApplySession(threading.Thread):
         empty = sum(not f.get("filled") for f in info["fields"])
         feed.emit("apply", f"read {clip(re.sub(r'[?#].*$', '', self.page.url), 160)} · {len(info['fields'])} fields "
                            f"({empty} empty) · {len(info['buttons'])} buttons")
+        self._check_guards(force=True)
         return info
 
     def _no_progress(self, info: dict) -> bool:
@@ -886,6 +958,11 @@ def _form_profile(profile, fields: list[dict]) -> str:
 
 def _web(url: str) -> bool:
     return (url or "").startswith(("http://", "https://"))
+
+
+def _listed(names: list[str]) -> str:
+    """"A", "A and B", "A, B and C"."""
+    return names[0] if len(names) == 1 else ", ".join(names[:-1]) + " and " + names[-1]
 
 
 class Sessions:

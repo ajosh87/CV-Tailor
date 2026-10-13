@@ -11,6 +11,7 @@ the LLM, never logged.
 """
 import re
 from datetime import datetime
+from typing import NamedTuple
 
 # Runs inside the page. Returns a plain description of what can be filled and clicked.
 OBSERVE_JS = r"""
@@ -277,6 +278,62 @@ _CAPTCHA_FRAMES = re.compile(r"recaptcha|hcaptcha|challenges\.cloudflare\.com|ar
 _CHAT_FRAMES = re.compile(r"intercom|drift\.com|driftt|zendesk|zdassets|hubspot.*(messages|conversations)|usemessages|livechatinc|"
                           r"tidio|crisp\.chat|olark|freshchat|wchat\.|ada\.support|paradox\.ai|botpress|tawk\.to|landbot|"
                           r"chatbot|phenompeople\.com/.*chat", re.I)
+
+
+class Guard(NamedTuple):
+    name: str
+    loads: re.Pattern  # the scripts and frames it loads
+    globals: tuple = ()  # what its script sets on the page
+    cookies: tuple = ()  # the cookies it leaves (names, or how they start)
+
+
+# Bot detection a page can use. Most of it checks every visitor in the background, whether or not it ever shows a
+# challenge, for as long as the page is open: somewhere the assisted browser shouldn't linger.
+GUARDS = (
+    Guard("Google reCAPTCHA", re.compile(r"google\.com/recaptcha|recaptcha\.net|gstatic\.com/recaptcha", re.I), ("grecaptcha",)),
+    Guard("hCaptcha", re.compile(r"hcaptcha\.com", re.I), ("hcaptcha",)),
+    Guard("Cloudflare Turnstile", re.compile(r"challenges\.cloudflare\.com/turnstile|/challenge-platform/.*turnstile", re.I),
+          ("turnstile",)),
+    Guard("Cloudflare bot management", re.compile(r"/cdn-cgi/challenge-platform/(?!.*turnstile)", re.I), (),
+          ("__cf_bm", "cf_clearance")),
+    Guard("Arkose Labs", re.compile(r"arkoselabs\.com|funcaptcha\.com", re.I)),
+    Guard("Akamai Bot Manager", re.compile(r"/akam/\d+/", re.I), ("bmak",), ("_abck", "bm_sz", "ak_bmsc")),
+    Guard("DataDome", re.compile(r"datadome\.co|captcha-delivery\.com", re.I), ("ddjskey",), ("datadome",)),
+    Guard("HUMAN (PerimeterX)", re.compile(r"perimeterx\.net|px-cdn\.net|px-cloud\.net|pxchk\.net", re.I), ("_pxAppId",),
+          ("_px3", "_pxvid", "_pxhd")),
+    Guard("Imperva", re.compile(r"_Incapsula_Resource", re.I), (), ("incap_ses_", "visid_incap_", "reese84")),
+    Guard("Kasada", re.compile(r"/[0-9a-f-]{36}/[0-9a-f-]{36}/(ips|p)\.js", re.I), ("KPSDK",), ("KP_UIDz",)),
+    Guard("AWS WAF", re.compile(r"awswaf\.com", re.I), ("AwsWafIntegration",), ("aws-waf-token",)),
+    Guard("GeeTest", re.compile(r"geetest\.com", re.I), ("initGeetest", "initGeetest4")),
+    Guard("Friendly Captcha", re.compile(r"friendlycaptcha\.com", re.I), ("friendlyChallenge",)),
+    Guard("Fingerprint", re.compile(r"fpjs\.io|fpcdn\.io|openfpcdn\.io", re.I), ("FingerprintJS",)),
+)
+_GUARD_GLOBALS = sorted({name for guard in GUARDS for name in guard.globals})
+_GUARD_JS = """names => ({
+  urls: [...document.querySelectorAll('script[src], iframe[src]')].map(e => e.src).filter(Boolean).slice(0, 300),
+  globals: names.filter(n => { try { return window[n] !== undefined; } catch (e) { return false; } }),
+})"""
+
+
+def bot_checks(page) -> list[str]:
+    """The bot detection on this page ("Google reCAPTCHA", "Akamai Bot Manager"...), visible or not: from the scripts
+    and frames it loads, what they set on the page and the cookies they leave. Only noticed, never worked around."""
+    try:
+        seen = page.main_frame.evaluate(_GUARD_JS, _GUARD_GLOBALS)
+    except Exception:  # mid-navigation: the next look will do
+        return []
+    urls = seen["urls"] + [frame.url or "" for frame in page.frames[1:]]
+    try:
+        cookies = [c["name"] for c in page.context.cookies([page.url])]
+    except Exception:
+        cookies = []
+    return guards_in(urls, seen["globals"], cookies)
+
+
+def guards_in(urls: list[str], names: list[str], cookies: list[str]) -> list[str]:
+    return [g.name for g in GUARDS
+            if any(g.loads.search(u) for u in urls) or any(n in names for n in g.globals)
+            or any(c.startswith(p) for c in cookies for p in g.cookies)]
 
 
 class NotKept(Exception):

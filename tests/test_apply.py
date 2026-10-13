@@ -560,3 +560,56 @@ def test_chat_widgets_are_ignored_harmless_popups_closed_and_a_covered_button_na
             pg.perform(page, planner.Action("click", nxt["id"]), None)
         browser.close()
     assert "newsletter-overlay" in covered.value.cover
+
+
+def test_bot_detection_is_recognised_by_what_a_page_loads_and_never_by_ordinary_scripts():
+    from cv_maker.apply import scout
+    from cv_maker.apply.page import guards_in
+
+    assert guards_in(["https://www.google.com/recaptcha/api.js?render=k"], [], []) == ["Google reCAPTCHA"]
+    assert guards_in(["https://www.recaptcha.net/recaptcha/enterprise.js"], [], []) == ["Google reCAPTCHA"]
+    assert guards_in([], ["grecaptcha"], []) == ["Google reCAPTCHA"]  # invisible: only its script's global
+    turnstile = ["https://challenges.cloudflare.com/turnstile/v0/api.js",
+                 "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/ov2/av0/rcv0/0/x"]
+    assert guards_in(turnstile, ["turnstile"], []) == ["Cloudflare Turnstile"]
+    assert guards_in(["https://careers.acme.com/cdn-cgi/challenge-platform/scripts/jsd/main.js"], [], ["__cf_bm"]) == [
+        "Cloudflare bot management"]
+    assert guards_in([], ["bmak"], ["_abck", "bm_sz"]) == ["Akamai Bot Manager"]
+    assert guards_in([], [], ["incap_ses_123_456", "visid_incap_456"]) == ["Imperva"]
+    assert guards_in(["https://js.datadome.co/tags.js"], [], ["datadome"]) == ["DataDome"]
+    assert guards_in(["https://client.perimeterx.net/PXabc/main.min.js"], ["_pxAppId"], []) == ["HUMAN (PerimeterX)"]
+    assert guards_in(["https://www.google.com/recaptcha/api.js"], [], ["_abck"]) == ["Google reCAPTCHA", "Akamai Bot Manager"]
+    ordinary = ["https://fonts.googleapis.com/css2?family=Inter", "https://www.google.com/maps/embed?pb=1",
+                "https://www.googletagmanager.com/gtm.js?id=GTM-1", "https://cdn.jsdelivr.net/npm/jquery@3.7.1/dist/jquery.min.js",
+                "https://careers.acme.com/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"]
+    assert guards_in(ordinary, ["jQuery", "dataLayer"], ["session", "_ga", "OptanonConsent"]) == []
+    # The check before applying says so too.
+    assert "acme.com uses bot detection (Google reCAPTCHA)" in scout.summary({"guards": {"acme.com": ["Google reCAPTCHA"]}})
+
+
+@needs_browser
+def test_bot_detection_is_named_and_the_browser_doesnt_linger_there_unwatched(tmp_path, monkeypatch):
+    from cv_maker.apply import session as apply_session
+
+    monkeypatch.setattr(apply_session, "GUARDED_CLOSE", 2)  # seconds, for the test (3 minutes in use)
+    site, store, application, session, model = _setup(tmp_path, "/apply/5/start")
+    try:
+        session.start()
+        wall = _wait(store, application.id, lambda a: a.waiting.get("kind") == "account", "the sign-in page")
+        assert wall.guards == {"127.0.0.1": ["Google reCAPTCHA", "Cloudflare bot management"]}
+        end = time.monotonic() + 3.5
+        while time.monotonic() < end:  # the live view is on screen: the browser stays open, however long
+            session.seen()
+            time.sleep(0.3)
+        assert session.is_alive() and store.get_application(application.id).status == "needs_you"
+        closed = _wait(store, application.id, lambda a: a.status == "stopped", "the browser to close", timeout=20)
+        session.join(timeout=30)
+        assert not session.is_alive()
+        assert closed.waiting["kind"] == "closed" and "uses Google reCAPTCHA and Cloudflare bot management" in closed.waiting["text"]
+        assert "Resume reopens the last page" in closed.waiting["text"] and "sign in" in closed.waiting["was"]
+        assert closed.current_url.endswith("/apply/5/start") and closed.guards == wall.guards  # Resume starts there
+        assert model.prompts == []
+    finally:
+        session.send({"action": "stop"})
+        session.join(timeout=30)
+        site.close()

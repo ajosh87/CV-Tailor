@@ -206,3 +206,40 @@ def test_start_watch_and_stop_from_the_app(tmp_path):
     finally:
         app.apply_sessions.stop_all()
         site.close()
+
+
+def test_the_application_page_names_bot_detection_and_why_the_browser_closed(tmp_path):
+    app = _app(tmp_path)
+    client = app.test_client()
+    run = _ready_job(app, client)
+    application = app.store.create_application(run, 1, "https://careers.acme.com/apply")
+    application.status, application.guards = "stopped", {"acme.com": ["Google reCAPTCHA"]}
+    application.waiting = {"kind": "closed", "text": "The assisted browser closed after 3 minutes of waiting for you.",
+                           "was": "A few questions need your answer."}
+    app.store.update_application(application)
+    body = client.get(f"/api/applications/{application.id}").get_json()
+    assert body["guards"] == {"acme.com": ["Google reCAPTCHA"]} and body["waiting"]["kind"] == "closed"
+    page = client.get(f"/applications/{application.id}").data.decode()
+    assert 'id="ap-guards"' in page and 'data-close-guarded="3"' in page and "closes after 10 minutes" in page
+
+    class Watched:  # a running assistant
+        mode, frame_seq, target, new_password, seen_count = "paused", 0, None, "", 0
+
+        def is_alive(self):
+            return True
+
+        def seen(self):
+            self.seen_count += 1
+
+    watched = Watched()
+    app.sessions._running[application.id] = watched
+    client.get(f"/api/applications/{application.id}?seen=1")  # the live view on screen
+    client.get(f"/api/applications/{application.id}")  # out of sight
+    assert watched.seen_count == 1
+    app.sessions._running.pop(application.id)
+
+    # The check before applying lists it on the start page.
+    run.scan = {"checked_at": "2026-10-01T10:00:00+00:00", "sites": ["acme.com"], "guards": {"acme.com": ["Google reCAPTCHA"]}}
+    app.store.update_run(run)
+    start = client.get(f"/runs/{run.id}/apply").data.decode()
+    assert "acme.com uses Google reCAPTCHA: bot detection" in start and "automated" not in start
